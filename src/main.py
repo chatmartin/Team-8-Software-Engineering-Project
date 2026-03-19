@@ -8,6 +8,31 @@ from account_handling import *
 def create_app(): #This creates a flask app to communicate with the frontend
     app = Flask(__name__)
 
+    @app.route('/')
+    def index():
+        return #TODO: change this to return render_template("file.html") once html is made
+
+    @app.route('/create_acc',methods=["POST"])
+    def create_acc():
+        data = request.get_json()
+        email = data.get('email')
+        if email == "":
+            email = None
+        msg = create_account(data.get('username'),data.get('password'),email)
+        return jsonify({"message":msg})
+
+    @app.route('/login',methods=["POST"])
+    def signin():
+        data = request.get_json()
+        msg = login(data.get('username'),data.get('password'))
+        return jsonify({"message":msg})
+
+    #TODO: This may need some changing if we add email verification or requiring password input/other checking
+    @app.route('/new_email', methods=["PUT"])
+    def new_email():
+        data = request.get_json()
+        msg = update_email(data.get('username'),data.get('email'))
+        return jsonify({"message":msg})
 
     return app
 
