@@ -2,6 +2,7 @@
 from globals import *
 import string
 from werkzeug.security import generate_password_hash, check_password_hash
+from email_validator import validate_email,EmailNotValidError
 
 def check_username(username): #checks if the username is valid (specifically, not taken by another user)
     conn = get_db_conn()
@@ -21,9 +22,13 @@ def check_pw(password): #if database is not connected, return false
 def hash_pw(password):
     return generate_password_hash(password,method="bcrypt")
 
-#TODO: Check if the email is valid
 def verify_email(email):
+    try:
+        valid_email = validate_email(email,check_deliverability=True).normalized
+    except EmailNotValidError as e:
+        return False
     return True
+
 
 def create_account(username,password,email_addr=None):
     conn = get_db_conn()

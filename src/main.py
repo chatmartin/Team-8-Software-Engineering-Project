@@ -4,7 +4,6 @@ from flask_cors import CORS
 from globals import *
 from account_handling import *
 
-#TODO: Start adding routes to connect with frontend
 def create_app(): #This creates a flask app to communicate with the frontend
     app = Flask(__name__)
 
