@@ -25,9 +25,9 @@ def hash_pw(password):
 def verify_email(email):
     try:
         valid_email = validate_email(email,check_deliverability=True).normalized
-    except EmailNotValidError as e:
-        return False
-    return True
+    except EmailNotValidError:
+        return valid_email
+    return None
 
 
 def create_account(username,password,email_addr=None):
