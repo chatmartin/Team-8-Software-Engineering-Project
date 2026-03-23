@@ -10,6 +10,7 @@ def test_pw_check():
     pw4 = '123ABC@$&longer'
     assert(not check_pw(pw1) and not check_pw(pw2) and not check_pw(pw3) and check_pw(pw4))
 
+#TODO: Have a consistent test for creation, maybe add account deletion?
 def test_acc_creation():
     app = create_app()
     with app.app_context():
