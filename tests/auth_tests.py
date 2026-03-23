@@ -15,3 +15,30 @@ def test_acc_creation():
     with app.app_context():
         msg = create_account("NOTTAKEN","123ABC@$&longer")
         assert('Account already exists' in msg)
+
+def test_acc_login():
+    app = create_app()
+    with app.app_context():
+        #Case 1: Valid
+        msg = login("NOTTAKEN","123ABC@$&longer")
+        assert('successful' in msg)
+        #Case 2: Invalid user
+        msg = login("TAKEN","<PASSWORD>")
+        assert('ERROR' in msg)
+        #Case 3: Invalid password
+        msg = login("NOTTAKEN","<PASSWORD>")
+        assert('ERROR' in msg)
+
+
+def test_email_update():
+    app = create_app()
+    with app.app_context():
+        #Case 1: Invalid email address
+        msg = update_email("NOTTAKEN","hi")
+        assert('ERROR' in msg)
+        #Case 2: Valid
+        msg = update_email("NOTTAKEN","mzuckerberg@fb.com")
+        assert('successfully' in msg)
+        #Case 3: Invalid account
+        msg = update_email("NOTNOTTAKEN","mzuckerberg@fb.com")
+        assert('ERROR' in msg)

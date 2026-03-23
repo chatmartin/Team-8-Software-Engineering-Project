@@ -17,8 +17,8 @@ def verify_email(email):
     try:
         valid_email = validate_email(email,check_deliverability=True).normalized
     except EmailNotValidError:
-        return valid_email
-    return None
+        return None
+    return valid_email
 
 
 def create_account(username,password,email_addr=None):
