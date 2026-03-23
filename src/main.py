@@ -60,6 +60,7 @@ def create_app(): #This creates a flask app to communicate with the frontend
     return app
 
 if __name__ == '__main__':
+    get_db_conn()
     app = create_app()
     CORS(app) #TODO: change to be CORS(app,origins=["https://domainname.com"]) once domain is established to connect to frontend
     app.run(debug=True)

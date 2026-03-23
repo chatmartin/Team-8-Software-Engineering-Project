@@ -61,8 +61,6 @@ def remove_meal(meal_id):
         query = "DELETE FROM meals WHERE meal_id = %s"
         cursor.execute(query,(meal_id,))
         conn.commit()
-        query = "DELETE FROM user_meals WHERE meal_id = %s"
-        cursor.execute(query,(meal_id,))
         return "Meal removed successfully."
 
 #Allows the user to update an existing meal. Note that we only need to change the meal table since the particular meal is still connected to the same user
