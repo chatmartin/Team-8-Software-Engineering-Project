@@ -4,6 +4,7 @@ from flask_cors import CORS
 from globals import *
 from account_handling import *
 from food_tracking import *
+from goal_tracking import *
 
 def create_app(): #This creates a flask app to communicate with the frontend
     app = Flask(__name__)
@@ -56,6 +57,32 @@ def create_app(): #This creates a flask app to communicate with the frontend
     def update_usr_meal():
         data = request.get_json()
         result = update_meal(data.get('meal_id'),data.get('meal'),data.get('eaten_at'))
+        return jsonify({"message":result})
+
+    @app.route('/get_usr_goals',methods=["GET"])
+    def get_usr_goals():
+        data = request.get_json()
+        result = get_goals(data.get('username'))
+        return jsonify(result)
+
+    @app.route('/add_usr_goal',methods=["POST"])
+    def add_usr_goal():
+        data = request.get_json()
+        result = add_goal(data.get('username'),data.get('nutrient'),data.get('amount'),data.get('min_max'))
+        return jsonify({"message":result})
+
+    @app.route('/update_usr_goal',methods=["PUT"])
+    def update_usr_goal():
+        data = request.get_json()
+        result = update_goal(data.get('username'),data.get('nutrient'),data.get('amount'),data.get('min_max'))
+        return jsonify({"message":result})
+
+    @app.route('/del_usr_goal',methods=["DELETE"])
+    def del_usr_goal():
+        data = request.get_json()
+        result = remove_goal(data.get('username'),data.get('nutrient'))
+        return jsonify({"message":result})
+
 
     return app
 

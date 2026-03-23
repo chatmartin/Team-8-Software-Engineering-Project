@@ -57,12 +57,13 @@ def remove_meal(meal_id):
         row = cursor.fetchone()
         if row is None:
             return "ERROR: Meal not found."
-        #Remove the meal from the meals table and from the user meal table
-        query = "DELETE FROM meals WHERE meal_id = %s"
+        #Remove the meal from the user_meals table, changes should cascade in the meals table
+        query = "DELETE FROM user_meals WHERE meal_id = %s"
         cursor.execute(query,(meal_id,))
         conn.commit()
         return "Meal removed successfully."
 
+#TODO: Ensure same restrictions as in add_meal()
 #Allows the user to update an existing meal. Note that we only need to change the meal table since the particular meal is still connected to the same user
 def update_meal(meal_id,meal,eaten_at):
     conn = get_db_conn()
