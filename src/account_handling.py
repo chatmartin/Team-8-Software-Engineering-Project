@@ -4,15 +4,6 @@ import string
 from werkzeug.security import generate_password_hash, check_password_hash
 from email_validator import validate_email,EmailNotValidError
 
-def check_username(username): #checks if the username is valid (specifically, not taken by another user)
-    conn = get_db_conn()
-    if conn is None: #if database is not connected, give an error
-        return "ERROR: Unable to access database."
-    with conn.cursor as cursor:
-        query = "SELECT username FROM login_info WHERE username = %s"
-        cursor.execute(query,(username,))
-    return cursor.fetchone() is None  #This is true if the username is not found in the database -> username is not taken
-
 #TODO: set requirements for password (e.g., length, characters, etc.) for extra security, may need to edit to account for different cases to tell user what to change
 def check_pw(password): #if database is not connected, return false
     if len(password)<12 or not any(char.isdigit() for char in password) or not any(char.isupper() for char in password) or not any(char in string.punctuation for char in password):
@@ -20,7 +11,7 @@ def check_pw(password): #if database is not connected, return false
     return True
 
 def hash_pw(password):
-    return generate_password_hash(password,method="bcrypt")
+    return generate_password_hash(password)
 
 def verify_email(email):
     try:
@@ -36,12 +27,14 @@ def create_account(username,password,email_addr=None):
         return "ERROR: Unable to access database."
     if not check_pw(password): #check that password is valid
         return "ERROR: Invalid password."
-    if not check_username(username): #check that username is not taken
-        return "ERROR: Username is taken."
     if email_addr is not None and not verify_email(email_addr):
         return "ERROR: Email address is invalid."
-    query = "INSERT INTO login_info(username,password,email_address) VALUES(%s,%s,%s)"
     with conn.cursor() as cursor:
+        query = "SELECT * FROM login_info WHERE username=%s"
+        cursor.execute(query,(username,))
+        if cursor.fetchone():
+            return "ERROR: Account already exists."
+        query = "INSERT INTO login_info(username,password,email_address) VALUES(%s,%s,%s)"
         cursor.execute(query,(username,hash_pw(password),email_addr,)) #make sure to store hashed password
         conn.commit()
     return "Account created successfully."
