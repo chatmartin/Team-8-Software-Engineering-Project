@@ -13,7 +13,7 @@ def get_meals(username):
         row = cursor.fetchone()
         if row is None:
             return {"success": False, "message": "ERROR: User not found."}
-        query = "SELECT * FROM meals WHERE meal_id IN (SELECT meal_id FROM user_meals WHERE user_id = %s"
+        query = "SELECT * FROM meals WHERE meal_id IN (SELECT meal_id FROM user_meals WHERE user_id = %s)"
         cursor.execute(query, (row[0],))
         return {"success":True,"data":cursor.fetchall()}
 
@@ -33,16 +33,16 @@ def add_meal(username,meal,eaten_at):
         uid = row[0]
         #Second, insert the meal into the meal table
         query = "INSERT INTO meals (meal,eaten_at) VALUES (%s,%s)"
-        cursor.execute(query,(meal,eaten_at,))
+        cursor.execute(query,(meal,eaten_at))
         conn.commit()
         #Third, get the generated meal id
         query = "SELECT meal_id FROM meals WHERE meal = %s AND eaten_at = %s"
-        cursor.execute(query,(meal,eaten_at,))
+        cursor.execute(query,(meal,eaten_at))
         row = cursor.fetchone()
         meal_id = row[0]
         #Finally, connect the meal to its corresponding user
         query = "INSERT INTO user_meals (user_id, meal_id) VALUES (%s,%s)"
-        cursor.execute(query,(uid,meal_id,))
+        cursor.execute(query,(uid,meal_id))
         conn.commit()
         return {"message":"Meal added successfully.","id":meal_id}
 
@@ -57,8 +57,8 @@ def remove_meal(meal_id):
         row = cursor.fetchone()
         if row is None:
             return "ERROR: Meal not found."
-        #Remove the meal from the user_meals table, changes should cascade in the meals table
-        query = "DELETE FROM user_meals WHERE meal_id = %s"
+        #Remove the meal from the meals table, changes should cascade in the user_meals table
+        query = "DELETE FROM meals WHERE meal_id = %s"
         cursor.execute(query,(meal_id,))
         conn.commit()
         return "Meal removed successfully."
@@ -72,7 +72,7 @@ def update_meal(meal_id,meal,eaten_at):
     with conn.cursor() as cursor:
         #Now, update the data
         query = "UPDATE meals SET meal=%s, eaten_at=%s WHERE meal_id=%s"
-        cursor.execute(query,(meal,eaten_at,meal_id,))
+        cursor.execute(query,(meal,eaten_at,meal_id))
         conn.commit()
         if cursor.rowcount == 0:
             return "ERROR: Meal not found."
