@@ -1,0 +1,2 @@
+git rm -r --cached backend/tests/__pycache__
+git rm -r --cached web-app/backend/tests/__pycache__
