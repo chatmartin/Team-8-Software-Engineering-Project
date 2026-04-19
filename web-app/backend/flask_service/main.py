@@ -1,0 +1,96 @@
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+
+from .account_handling import create_account, login, update_email
+from .food_tracking import add_meal, get_meals, remove_meal, update_meal
+from .goal_tracking import add_goal, get_goals, remove_goal, update_goal
+
+
+def create_app():
+    app = Flask(__name__)
+
+    @app.route("/")
+    def index():
+        return ""
+
+    @app.route("/create_acc", methods=["POST"])
+    def create_acc():
+        data = request.get_json()
+        email = data.get("email")
+        if email == "":
+            email = None
+        msg = create_account(data.get("username"), data.get("password"), email)
+        return jsonify({"message": msg})
+
+    @app.route("/login", methods=["POST"])
+    def signin():
+        data = request.get_json()
+        msg = login(data.get("username"), data.get("password"))
+        return jsonify({"message": msg})
+
+    @app.route("/new_email", methods=["PUT"])
+    def new_email():
+        data = request.get_json()
+        msg = update_email(data.get("username"), data.get("email"))
+        return jsonify({"message": msg})
+
+    @app.route("/get_usr_meals", methods=["GET"])
+    def get_usr_meals():
+        data = request.get_json()
+        result = get_meals(data.get("username"))
+        return jsonify(result)
+
+    @app.route("/add_usr_meal", methods=["POST"])
+    def add_usr_meal():
+        data = request.get_json()
+        result = add_meal(data.get("username"), data.get("meal"), data.get("eaten_at"))
+        return jsonify(result)
+
+    @app.route("/del_usr_meal", methods=["DELETE"])
+    def del_usr_meal():
+        data = request.get_json()
+        result = remove_meal(data.get("meal_id"))
+        return jsonify({"message": result})
+
+    @app.route("/update_usr_meal", methods=["PUT"])
+    def update_usr_meal():
+        data = request.get_json()
+        result = update_meal(data.get("meal_id"), data.get("meal"), data.get("eaten_at"))
+        return jsonify({"message": result})
+
+    @app.route("/get_usr_goals", methods=["GET"])
+    def get_usr_goals():
+        data = request.get_json()
+        result = get_goals(data.get("username"))
+        return jsonify(result)
+
+    @app.route("/add_usr_goal", methods=["POST"])
+    def add_usr_goal():
+        data = request.get_json()
+        result = add_goal(
+            data.get("username"),
+            data.get("nutrient"),
+            data.get("amount"),
+            data.get("min_max"),
+        )
+        return jsonify({"message": result})
+
+    @app.route("/update_usr_goal", methods=["PUT"])
+    def update_usr_goal():
+        data = request.get_json()
+        result = update_goal(
+            data.get("username"),
+            data.get("nutrient"),
+            data.get("amount"),
+            data.get("min_max"),
+        )
+        return jsonify({"message": result})
+
+    @app.route("/del_usr_goal", methods=["DELETE"])
+    def del_usr_goal():
+        data = request.get_json()
+        result = remove_goal(data.get("username"), data.get("nutrient"))
+        return jsonify({"message": result})
+
+    CORS(app)
+    return app
