@@ -36,7 +36,7 @@ def create_app(): #This creates a flask app to communicate with the frontend
         msg = update_email(data.get('username'),data.get('email'))
         return jsonify({"message":msg})
 
-    @app.route('del_account',methods=["DELETE"])
+    @app.route('/del_account',methods=["DELETE"])
     def del_account():
         data = request.get_json()
         msg = delete_account(data.get('username'))
@@ -138,31 +138,31 @@ def create_app(): #This creates a flask app to communicate with the frontend
         result = add_bio_data(data.get('username'),data.get('gender'),data.get('height'),data.get('weight'),data.get('body_fat'),data.get('age'))
         return jsonify({"message":result})
 
-    @app.route('update_usr_gender',methods=["PUT"])
+    @app.route('/update_usr_gender',methods=["PUT"])
     def update_usr_gender():
         data = request.get_json()
         result = update_gender(data.get('username'),data.get('gender'))
         return jsonify({"message":result})
 
-    @app.route('update_usr_height',methods=["PUT"])
+    @app.route('/update_usr_height',methods=["PUT"])
     def update_usr_height():
         data = request.get_json()
         result = update_height(data.get('username'),data.get('height'))
         return jsonify({"message":result})
 
-    @app.route('update_usr_weight',methods=["PUT"])
+    @app.route('/update_usr_weight',methods=["PUT"])
     def update_usr_weight():
         data = request.get_json()
         result = update_weight(data.get('username'),data.get('weight'))
         return jsonify({"message":result})
 
-    @app.route('update_usr_fat',methods=["PUT"])
+    @app.route('/update_usr_fat',methods=["PUT"])
     def update_usr_fat():
         data = request.get_json()
         result = update_body_fat(data.get('username'),data.get('body_fat'))
         return jsonify({"message":result})
 
-    @app.route('update_usr_age',methods=["PUT"])
+    @app.route('/update_usr_age',methods=["PUT"])
     def update_usr_age():
         data = request.get_json()
         result = update_age(data.get('username'),data.get('age'))
