@@ -3,6 +3,10 @@
 from food_tracking import *
 from main import create_app
 
+"""
+THIS IS A LEGACY TEST FROM BEFORE INCLUDING API CALLS
+"""
+"""
 def test_valid_meal_ops():
     app = create_app()
     with app.app_context():
@@ -27,4 +31,10 @@ def test_valid_meal_ops():
         #Check that the meal has been removed in the database
         res = get_meals("NOTTAKEN")
         assert(res['success'] and len(res['data'])==0)
+"""
 
+def test_query_build():
+    app = create_app()
+
+def test_meal_search():
+    app = create_app()

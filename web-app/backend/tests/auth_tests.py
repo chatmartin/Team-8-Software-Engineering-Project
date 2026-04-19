@@ -14,8 +14,8 @@ def test_pw_check():
 def test_acc_creation():
     app = create_app()
     with app.app_context():
-        msg = create_account("NOTTAKEN","123ABC@$&longer")
-        assert('Account already exists' in msg)
+        msg = create_account("admin",admin_password)
+        assert('already exists' in msg)
 
 def test_acc_login():
     app = create_app()
@@ -29,6 +29,8 @@ def test_acc_login():
         #Case 3: Invalid password
         msg = login("NOTTAKEN","<PASSWORD>")
         assert('ERROR' in msg)
+        msg = login("admin",admin_password)
+        assert('success' in msg)
 
 
 def test_email_update():
