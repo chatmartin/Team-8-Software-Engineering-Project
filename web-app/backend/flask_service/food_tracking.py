@@ -215,6 +215,7 @@ def search_meal(meal_query, username):
                 "recipe_id": recipe_id,
                 "ingredients": [],
                 "nutrients": {},
+                "flags":[]
             }
 
             # ingredients
@@ -249,6 +250,16 @@ def search_meal(meal_query, username):
             for nut in cursor.fetchall():
                 meal_data["nutrients"][nut[0]] = nut[1]
 
+            #check for low-level dislikes (flags)
+            query = "SELECT ingredient FROM ingredients i JOIN user_allergies u ON i.ingredient_id = u.allergen_id WHERE severity='low'"
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            for r in rows:
+                dislike = r[0]
+                for ingredient in meal_data["ingredients"]:
+                    if dislike in ingredient["name"]:
+                        meal_data["flags"].append(dislike)
+                        break
 
             meal_results.append(meal_data)
 

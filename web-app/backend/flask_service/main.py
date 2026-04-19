@@ -42,6 +42,7 @@ def create_app(): #This creates a flask app to communicate with the frontend
         msg = delete_account(data.get('username'))
         return jsonify({"message":msg})
 
+    #IMPORTANT: result is null if the API call was unsuccessful. it is an empty array if no results were returned
     @app.route('/search',methods=["GET"])
     def search():
         data = request.get_json()
