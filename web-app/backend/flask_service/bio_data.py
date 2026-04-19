@@ -2,7 +2,7 @@
 
 from globals import *
 
-def add_bio_data(username,gender,height,weight,body_fat,age):
+def add_bio_data(username,gender,height,weight,body_fat,age,activity):
     conn = get_db_conn()
     if conn is None:
         return "ERROR: Could not connect to the database."
@@ -13,8 +13,8 @@ def add_bio_data(username,gender,height,weight,body_fat,age):
         if row is None:
             return "ERROR: User not found."
         user_id = row[0]
-        query = "INSERT INTO user_bio_data(user_id,gender,height,weight,body_fat,age) VALUES (%s,%s,%s,%s,%s,%s)"
-        cursor.execute(query,(user_id,gender,height,weight,body_fat,age))
+        query = "INSERT INTO user_bio_data(user_id,gender,height,weight,body_fat,age,activity_level) VALUES (%s,%s,%s,%s,%s,%s)"
+        cursor.execute(query,(user_id,gender,height,weight,body_fat,age,activity))
         conn.commit()
         if conn.rowcount == 0:
             return "ERROR: Data insertion unsuccessful."
@@ -109,3 +109,21 @@ def update_age(username,age):
         if conn.rowcount == 0:
             return "ERROR: Age update unsuccessful."
         return "Age updated successfully."
+
+def update_activity(username,activity):
+    conn = get_db_conn()
+    if conn is None:
+        return "ERROR: Could not connect to the database."
+    with conn.cursor() as cursor:
+        query = "SELECT user_id FROM login_info WHERE username=%s"
+        cursor.execute(query, (username,))
+        row = cursor.fetchone()
+        if row is None:
+            return "ERROR: User not found."
+        user_id = row[0]
+        query = "UPDATE user_bio_data SET activity_level=%s WHERE user_id=%s"
+        cursor.execute(query, (activity, user_id))
+        conn.commit()
+        if conn.rowcount == 0:
+            return "ERROR: Activity level update unsuccessful."
+        return "Activity level updated successfully."

@@ -6,6 +6,7 @@ from food_tracking import *
 from goal_tracking import *
 from restrictions import *
 from bio_data import *
+from standard_goals import *
 
 def create_app(): #This creates a flask app to communicate with the frontend
     app = Flask(__name__)
@@ -136,7 +137,7 @@ def create_app(): #This creates a flask app to communicate with the frontend
     @app.route('/add_bio',methods=["POST"])
     def add_bio():
         data = request.get_json()
-        result = add_bio_data(data.get('username'),data.get('gender'),data.get('height'),data.get('weight'),data.get('body_fat'),data.get('age'))
+        result = add_bio_data(data.get('username'),data.get('gender'),data.get('height'),data.get('weight'),data.get('body_fat'),data.get('age'),data.get('activity'))
         return jsonify({"message":result})
 
     @app.route('/update_usr_gender',methods=["PUT"])
@@ -168,6 +169,32 @@ def create_app(): #This creates a flask app to communicate with the frontend
         data = request.get_json()
         result = update_age(data.get('username'),data.get('age'))
         return jsonify({"message":result})
+
+    @app.route('/update_usr_activity',methods=["PUT"])
+    def update_usr_activity():
+        data = request.get_json()
+        result = update_activity(data.get('username'),data.get('activity'))
+        return jsonify({"message":result})
+
+    @app.route('/usr_weekly_nutrient_progress',methods=["GET"])
+    def usr_weekly_nutrient_progress():
+        data = request.get_json()
+        result = weekly_nutrient_progress(data.get('username'))
+        return jsonify(result)
+
+    @app.route('/usr_daily_nutrient_progress',methods=["GET"])
+    def usr_daily_nutrient_progress():
+        data = request.get_json()
+        result = daily_nutrient_progress(data.get('username'))
+        return jsonify(result)
+
+    @app.route('/rec_goal',methods=["GET"])
+    def rec_goal():
+        data = request.get_json()
+        result = recommended_goal(data.get('username'))
+        return jsonify(result)
+
+
 
     return app
 
