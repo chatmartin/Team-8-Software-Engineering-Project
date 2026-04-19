@@ -96,6 +96,7 @@ def cache_results(query_list,signature,cursor,conn):
                 "INSERT INTO meals (meal, recipe_id) VALUES (%s, %s)",
                 (meal['meal'], meal['recipe_id'])
             )
+            conn.commit()
 
             # get meal id
             cursor.execute(
@@ -117,27 +118,29 @@ def cache_results(query_list,signature,cursor,conn):
                 nid = nrow[0]
 
                 cursor.execute(
-                    "INSERT INTO meal_nutrients (meal_id, nutrient_id, amount) VALUES (%s, %s, %s)",
+                    "INSERT INTO meal_nutrients (meal_id, nutrient_id, amount) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                     (mid, nid, val['amount'])
                 )
+                conn.commit()
 
             # Insert ingredients
             for ing in meal['ingredients']:
 
                 cursor.execute(
-                    "SELECT ingredient_id FROM ingredients WHERE name = %s",
+                    "SELECT ingredient_id FROM ingredients WHERE ingredient = %s",
                     (ing['name'],)
                 )
                 irow = cursor.fetchone()
 
                 if irow is None:
                     cursor.execute(
-                        "INSERT INTO ingredients (name) VALUES (%s)",
+                        "INSERT INTO ingredients (ingredient) VALUES (%s)",
                         (ing['name'],)
                     )
+                    conn.commit()
 
                     cursor.execute(
-                        "SELECT ingredient_id FROM ingredients WHERE name = %s",
+                        "SELECT ingredient_id FROM ingredients WHERE ingredient = %s",
                         (ing['name'],)
                     )
                     iid = cursor.fetchone()[0]
@@ -145,31 +148,19 @@ def cache_results(query_list,signature,cursor,conn):
                     iid = irow[0]
 
                 cursor.execute(
-                    "INSERT INTO meal_ingredients (meal_id, ingredient_id, amount, unit) VALUES (%s, %s, %s, %s)",
+                    "INSERT INTO meal_ingredients (meal_id, ingredient_id, amount, unit) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
                     (mid, iid, ing['amount'], ing['unit'])
                 )
+                conn.commit()
 
-            # Insert violations (flags)
-            for flag, value in meal['flags'].items():
-                if not value:
-                    cursor.execute(
-                        "SELECT restriction_id FROM dietary_restrictions WHERE restriction = %s",
-                        (flag,)
-                    )
-                    rrow = cursor.fetchone()
-                    if rrow:
-                        rid = rrow[0]
-                        cursor.execute(
-                            "INSERT INTO meal_violations (meal_id, restriction_id) VALUES (%s, %s)",
-                            (mid, rid)
-                        )
+            conn.commit()
 
         else:
             mid = row[0]
 
         # Insert rank
         cursor.execute(
-            "INSERT INTO meal_queries (meal_id, query_id, position) VALUES (%s, %s, %s)",
+            "INSERT INTO meal_queries (meal_id, query_id, rank) VALUES (%s, %s, %s)",
             (mid, qid, rank)
         )
 
@@ -208,7 +199,7 @@ def search_meal(meal_query, username):
             JOIN queries q ON mq.query_id = q.query_id
             JOIN meals m ON mq.meal_id = m.meal_id
             WHERE q.query_signature = %s
-            ORDER BY mq.position
+            ORDER BY mq.rank
             """,
             (signature,)
         )
@@ -224,13 +215,12 @@ def search_meal(meal_query, username):
                 "recipe_id": recipe_id,
                 "ingredients": [],
                 "nutrients": {},
-                "flags": {}
             }
 
             # ingredients
             cursor.execute(
                 """
-                SELECT i.name, m.amount, m.unit
+                SELECT i.ingredient, m.amount, m.unit
                 FROM meal_ingredients m
                 JOIN ingredients i ON m.ingredient_id = i.ingredient_id
                 WHERE m.meal_id = %s
@@ -259,28 +249,6 @@ def search_meal(meal_query, username):
             for nut in cursor.fetchall():
                 meal_data["nutrients"][nut[0]] = nut[1]
 
-            # flags (default True, mark violations False)
-            meal_data["flags"] = {
-                "vegetarian": True,
-                "vegan": True,
-                "gluten_free": True,
-                "dairy_free": True,
-                "ketogenic": True,
-                "whole30": True
-            }
-
-            cursor.execute(
-                """
-                SELECT d.restriction
-                FROM meal_violations m
-                JOIN dietary_restrictions d ON m.restriction_id = d.restriction_id
-                WHERE m.meal_id = %s
-                """,
-                (mid,)
-            )
-
-            for res in cursor.fetchall():
-                meal_data["flags"][res[0]] = False
 
             meal_results.append(meal_data)
 

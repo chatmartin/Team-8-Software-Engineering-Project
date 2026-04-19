@@ -26,8 +26,6 @@ def fetch_meals(meal_name,diets,allergens,excludes):
             return None
 
         results = res.json().get("results",[])
-        if not results:
-            return None
 
         meals = []
 
@@ -41,7 +39,7 @@ def fetch_meals(meal_name,diets,allergens,excludes):
             #set up nutrient dictionary for each nutrient with potential unit conversion and amount
             nutrients = {}
             for n in r.get("nutrition", {}).get("nutrients", []):
-                name = n["name"]
+                name = n["name"].lower()
                 amount = n["amount"]
 
                 api_unit = normalize_unit_name(n["unit"])
@@ -74,14 +72,6 @@ def fetch_meals(meal_name,diets,allergens,excludes):
                     }
                     for i in r.get("extendedIngredients",[])
                 ],
-                "flags":{
-                    "vegetarian":r.get("vegetarian"),
-                    "vegan":r.get("vegan"),
-                    "gluten_free":r.get("glutenFree"),
-                    "dairy_free":r.get("dairyFree"),
-                    "ketogenic":r.get('ketogenic'),
-                    "whole30":r.get("whole30")
-                },
                 "nutrients":nutrients,
             })
 
