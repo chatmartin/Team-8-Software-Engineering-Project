@@ -71,7 +71,7 @@ def create_app(): #This creates a flask app to communicate with the frontend
     @app.route('/update_usr_meal',methods=["PUT"])
     def update_usr_meal():
         data = request.get_json()
-        result = update_meal(data.get('username'),data.get('recipe_id_old'),data.get('recipe_id_new'))
+        result = update_meal(data.get('username'),data.get('recipe_id_old'),data.get('recipe_id_new'),data.get('eaten_at')
         return jsonify({"message":result})
 
     @app.route('/update_usr_meal_time',methods=["PUT"])
