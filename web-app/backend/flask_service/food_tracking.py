@@ -358,7 +358,7 @@ def update_meal_time(username,recipe_id,eaten_at):
             return "ERROR: Meal not found."
         return "Meal updated successfully."
 
-def update_meal(username,old_recipe_id,new_recipe_id):
+def update_meal(username,old_recipe_id,new_recipe_id,eaten_at):
     conn = get_db_conn()
     if conn is None:
         return "ERROR: Unable to access database."
@@ -381,8 +381,8 @@ def update_meal(username,old_recipe_id,new_recipe_id):
         if row is None:
             return "ERROR: Meal not found."
         old_meal_id = row[0]
-        query = "UPDATE user_meals SET meal_id=%s WHERE meal_id=%s"
-        cursor.execute(query,(new_meal_id,old_meal_id))
+        query = "UPDATE user_meals SET meal_id=%s WHERE meal_id=%s AND eaten_at=%s AND user_id = %s"
+        cursor.execute(query,(new_meal_id,old_meal_id,eaten_at,user_id))
         conn.commit()
         if cursor.rowcount == 0:
             return "ERROR: Meal not found."
