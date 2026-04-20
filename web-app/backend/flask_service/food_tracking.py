@@ -351,7 +351,7 @@ def update_meal_time(username,recipe_id,eaten_at):
             return "ERROR: Meal not found."
         meal_id = row[0]
         #Now, update the data
-        query = "UPDATE user_meals SET eaten_at=%s WHERE meal_id=%s,user_id=%s"
+        query = "UPDATE user_meals SET eaten_at=%s WHERE meal_id=%s AND user_id=%s"
         cursor.execute(query,(eaten_at,meal_id,user_id))
         conn.commit()
         if cursor.rowcount == 0:
