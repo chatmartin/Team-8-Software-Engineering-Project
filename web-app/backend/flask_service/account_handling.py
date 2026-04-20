@@ -73,8 +73,19 @@ def update_email(username, email_addr):
         return "ERROR: Email address is invalid."
     query = "UPDATE login_info SET email_address = %s WHERE username = %s"
     with conn.cursor() as cursor:
-        cursor.execute(query, (email_addr, username))
+        cursor.execute(query,(email_addr,username,))
         conn.commit()
-        if cursor.rowcount == 0:
+        if cursor.rowcount == 0: 
             return "ERROR: User not found."
     return "Email address updated successfully."
+
+def delete_account(username):
+    conn = get_db_conn()
+    if conn is None:
+        return "ERROR: Unable to access database."
+    query = "DELETE FROM login_info WHERE username = %s"
+    with conn.cursor() as cursor:
+        cursor.execute(query,(username,))
+        conn.commit()
+        if cursor.rowcount == 0: return "ERROR: User not found."
+        return "Account deleted successfully."

@@ -1,0 +1,8 @@
+To run these tests, open the terminal, go to the tests file and enter
+    pytest
+to run all tests. Enter
+    pytest test_file.py
+to run a specific test file.
+
+If pytest is not working for you, install pytest by entering:
+    pip install pystest

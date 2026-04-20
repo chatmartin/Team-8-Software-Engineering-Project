@@ -16,13 +16,17 @@ def get_goals(username):
         cursor.execute(query, (uid,))
         rows = cursor.fetchall()
         goals = [
-            {"nutrient": row[0], "target": row[1], "unit": row[2], "min_max": row[3]}
+            {
+                "nutrient":row[0],
+                "target":row[1],
+                "unit":row[2],
+                "min_max":row[3]
+            }
             for row in rows
         ]
-        return {"message": "Goals obtained successfully.", "goals": goals}
+        return {"message":"Goals obtained successfully.","goals":goals}
 
-
-def add_goal(username, nutrient, amount, min_max):
+def add_goal(username,nutrient,amount,min_max):
     conn = get_db_conn()
     if conn is None:
         return "ERROR: Unable to access database."
@@ -98,3 +102,61 @@ def remove_goal(username, nutrient):
         if row is None:
             return "ERROR: Goal not found."
         return "Goal removed successfully."
+
+def weekly_nutrient_progress(username):
+    conn = get_db_conn()
+    if conn is None:
+        return {"err":"ERROR: Unable to access database."}
+    with conn.cursor() as cursor:
+        query = "SELECT user_id FROM login_info WHERE username = %s"
+        cursor.execute(query, (username,))
+        row = cursor.fetchone()
+        if row is None:
+            return {"err":"ERROR: User not found."}
+        user_id = row[0]
+        query = """
+            SELECT 
+            n.name,
+            SUM(m.amount) / NULLIF(COUNT(DISTINCT DATE(u.eaten_at)), 0) AS avg_per_day,
+            n.unit
+            FROM user_meals u
+            JOIN meal_nutrients m ON u.meal_id = m.meal_id
+            JOIN nutrients n ON m.nutrient_id = n.nutrient_id
+            WHERE u.user_id = %s
+            AND u.eaten_at >= CURRENT_DATE - INTERVAL '7 days'
+            GROUP BY n.name, n.unit;
+            """
+        cursor.execute(query, (user_id,))
+        rows = cursor.fetchall()
+        if rows is []:
+            return {"err":"ERROR: No data found."}
+        data = {}
+        for name, avg, unit in rows:
+            data[name] = {
+                "avg_per_day": avg,
+                "unit": unit
+            }
+        return data
+
+def daily_nutrient_progress(username):
+    conn = get_db_conn()
+    if conn is None:
+        return {"err": "ERROR: Unable to access database."}
+    with conn.cursor() as cursor:
+        query = "SELECT user_id FROM login_info WHERE username = %s"
+        cursor.execute(query, (username,))
+        row = cursor.fetchone()
+        if row is None:
+            return {"err": "ERROR: User not found."}
+        user_id = row[0]
+        query = "SELECT name,SUM(amount) AS total,unit FROM user_meals u JOIN meal_nutrients m ON u.meal_id = m.meal_id JOIN nutrients n ON m.nutrient_id = n.nutrient_id WHERE u.user_id = %s AND (eaten_at AT TIME ZONE 'UTC')::date = CURRENT_DATE"
+        cursor.execute(query, (user_id,))
+        rows = cursor.fetchall()
+        if rows is None:
+            return {"err": "ERROR: No data found."}
+        data = {"err": "Success."}
+        for row in rows:
+            data[row[0]] = []
+            data[row[0]].append(row[1])
+            data[row[0]].append(row[2])
+        return data
