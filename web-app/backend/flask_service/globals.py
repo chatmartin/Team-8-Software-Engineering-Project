@@ -17,6 +17,6 @@ def get_db_conn():
             dbname="postgres",
             user="postgres.ezhtwxsfnfplbynavqtr",
             password=database_password,
-            port=5432
-        )#establishes connection with the database
+            port=5432,
+        )
     return g.db
