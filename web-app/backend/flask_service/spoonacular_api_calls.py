@@ -1,42 +1,45 @@
-#The purpose of this file is to handle API calls to Spoonacular
+"""Spoonacular recipe API integration."""
 
-from globals import *
 import requests
 
-#TODO: modify this to track other potential meal restrictions
-def fetch_meals(meal_name,diets,allergens,excludes):
-    #connect to the database for eventual unit checking
+from .globals import SPOONACULAR_API_KEY, get_db_conn
+
+
+def fetch_meals(meal_name, diets, allergens, excludes):
+    if not SPOONACULAR_API_KEY:
+        return None
     conn = get_db_conn()
+    if conn is None:
+        return None
     with conn.cursor() as cursor:
-        #make api call, get top 10 results based on user's search
         url = "https://api.spoonacular.com/recipes/complexSearch"
-        res = requests.get(url,params={
-            "query": meal_name,
-            "number":5,
-            "diet": ",".join(diets) if diets else None,
-            "intolerances": ",".join(allergens) if allergens else None,
-            "excludeIngredients": ",".join(excludes) if excludes else None,
-            "addRecipeInformation": True,
-            "fillIngredients": True,
-            "addRecipeNutrition": True,
-            "apiKey":spoon_api_key
-        },timeout=20)
-        #Make sure call is successful
+        res = requests.get(
+            url,
+            params={
+                "query": meal_name,
+                "number": 8,
+                "diet": ",".join(diets) if diets else None,
+                "intolerances": ",".join(allergens) if allergens else None,
+                "excludeIngredients": ",".join(excludes) if excludes else None,
+                "addRecipeInformation": True,
+                "fillIngredients": True,
+                "addRecipeNutrition": True,
+                "apiKey": SPOONACULAR_API_KEY,
+            },
+            timeout=20,
+        )
         if res.status_code != 200:
             return None
 
-        results = res.json().get("results",[])
-
+        results = res.json().get("results", [])
         meals = []
 
-        #preload nutrients
         cursor.execute("SELECT name, unit FROM nutrients")
         nutrient_map = {name: unit for name, unit in cursor.fetchall()}
 
         for r in results:
-            if 'kosher' in diets and not(r.get('dairyFree') or r.get('vegetarian')):
+            if "kosher" in diets and not (r.get("dairyFree") or r.get("vegetarian")):
                 continue
-            #set up nutrient dictionary for each nutrient with potential unit conversion and amount
             nutrients = {}
             for n in r.get("nutrition", {}).get("nutrients", []):
                 name = n["name"].lower()
@@ -57,53 +60,62 @@ def fetch_meals(meal_name,diets,allergens,excludes):
                 if api_unit != db_unit:
                     amount = normalize_unit(amount, api_unit, db_unit)
 
-                nutrients[name.lower()] = {
-                    "amount": amount
-                }
-            #construct meals list
+                nutrients[name.lower()] = {"amount": amount}
             meals.append({
                 "recipe_id": r["id"],
-                "meal":r["title"],
-                "ingredients":[
+                "meal": r["title"],
+                "ingredients": [
                     {
-                        "name":i["name"].lower(),
-                        "amount":i.get("amount"),
-                        "unit":i.get("unit")
+                        "name": i["name"].lower(),
+                        "amount": i.get("amount"),
+                        "unit": i.get("unit"),
                     }
-                    for i in r.get("extendedIngredients",[])
+                    for i in r.get("extendedIngredients", [])
                 ],
-                "nutrients":nutrients,
+                "nutrients": nutrients,
+                "recipe": {
+                    "servings": r.get("servings"),
+                    "ready_in_minutes": r.get("readyInMinutes"),
+                    "source_url": r.get("sourceUrl"),
+                    "summary": r.get("summary"),
+                    "steps": [
+                        step.get("step")
+                        for instruction in r.get("analyzedInstructions", [])
+                        for step in instruction.get("steps", [])
+                        if step.get("step")
+                    ],
+                },
             })
 
         return meals
 
-#written by ai
+
 def normalize_unit(amount, from_unit, to_unit):
     if from_unit == to_unit:
         return amount
 
-    # mg ↔ g
+    # mg <-> g
     if from_unit == "mg" and to_unit == "g":
         return amount / 1000
     if from_unit == "g" and to_unit == "mg":
         return amount * 1000
 
-    # µg ↔ mg
-    if from_unit == "µg" and to_unit == "mg":
+    # ug <-> mg
+    if from_unit == "ug" and to_unit == "mg":
         return amount / 1000
-    if from_unit == "mg" and to_unit == "µg":
+    if from_unit == "mg" and to_unit == "ug":
         return amount * 1000
 
-    # µg ↔ g
-    if from_unit == "µg" and to_unit == "g":
+    # ug <-> g
+    if from_unit == "ug" and to_unit == "g":
         return amount / 1_000_000
-    if from_unit == "g" and to_unit == "µg":
+    if from_unit == "g" and to_unit == "ug":
         return amount * 1_000_000
 
-    return amount  # fallback
+    return amount
 
-#normalizes micrograms for easy comparison
+
 def normalize_unit_name(unit):
-    if unit in ["μg", "ug", "mcg"]:
+    if unit in ["\u03bcg", "\u00b5g", "ug", "mcg"]:
         return "ug"
     return unit

@@ -1,131 +1,177 @@
-#The purpose of this file is to allow users to add allergens/dislikes as well as dietary restrictions
-#The idea is that on the frontend, they have a restricted selection of allergens they can input as low/high severity
-#They can also input ingredients they don't like with low/high levels of dislike (no restrictions)
-#This also helps with tracking dietary restrictions, as they can choose from a selection of diets
+"""Dietary restrictions, allergens, and dislike preferences."""
 
-from globals import *
+from .globals import fail, get_db_conn, ok
 
-#Since adding/deleting/updating an allergen vs dislike has very similar logic, they will use the same functions
-def add_allergen(username,allergen,severity):
+
+def _user_id(cursor, username):
+    cursor.execute("SELECT user_id FROM login_info WHERE username=%s", (username,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
+def get_preferences(username):
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to connect to the database."
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username=%s"
-        cursor.execute(query, (username,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: User not found"
-        user_id = row[0]
-        query = "SELECT ingredient_id FROM ingredients WHERE ingredient=%s"
-        cursor.execute(query, (allergen,))
-        row = cursor.fetchone()
-        if row is None:
-            if severity == 'high':
-                return "ERROR: Allergen not found"
-            query = "INSERT INTO ingredients(ingredient) VALUES(%s)"
-            cursor.execute(query, (allergen,))
-            query = "SELECT ingredient_id FROM ingredients WHERE ingredient=%s"
-            cursor.execute(query, (allergen,))
-            row = cursor.fetchone()
-        ingredient_id = row[0]
-        query = "INSERT INTO user_allergies(user_id,severity,allergen_id) VALUES(%s,%s,%s)"
-        cursor.execute(query, (user_id, severity, ingredient_id))
-        conn.commit()
-        if cursor.rowcount == 0:
-            return "ERROR: Allergen insertion unsuccessful" #Shouldn't happen, but this is a safety measure
-        return "Allergen added successfully"
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute(
+            """
+            SELECT i.ingredient, ua.severity
+            FROM user_allergies ua
+            JOIN ingredients i ON i.ingredient_id = ua.allergen_id
+            WHERE ua.user_id = %s
+            ORDER BY ua.severity, i.ingredient
+            """,
+            (uid,),
+        )
+        sensitivities = [
+            {"ingredient": row[0], "severity": row[1]} for row in cursor.fetchall()
+        ]
+        cursor.execute(
+            """
+            SELECT dr.restriction
+            FROM user_restrictions ur
+            JOIN dietary_restrictions dr ON dr.restriction_id = ur.restriction_id
+            WHERE ur.user_id = %s
+            ORDER BY dr.restriction
+            """,
+            (uid,),
+        )
+        diets = [row[0] for row in cursor.fetchall()]
+        return ok("Preferences obtained successfully.", {"diets": diets, "sensitivities": sensitivities})
 
-def add_restriction(username,restriction):
+
+def add_allergen(username, allergen, severity):
+    if severity not in {"low", "medium", "high"}:
+        return fail("Severity must be low, medium, or high.")
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to access database."
+        return fail("Database is not configured.", 503)
+    ingredient = (allergen or "").strip().lower()
+    if not ingredient:
+        return fail("Ingredient is required.")
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username=%s"
-        cursor.execute(query, (username,))
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT ingredient_id FROM ingredients WHERE ingredient=%s", (ingredient,))
         row = cursor.fetchone()
         if row is None:
-            return "ERROR: User not found"
-        user_id = row[0]
-        query = "SELECT restriction_id FROM dietary_restrictions WHERE restriction=%s"
-        cursor.execute(query, (restriction,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Restriction not found" #Shouldn't happen, this is a safety measure
-        restriction_id = row[0]
-        query = "INSERT INTO user_restrictions(user_id,restriction_id) VALUES(%s,%s)"
-        cursor.execute(query, (user_id, restriction_id))
+            cursor.execute("INSERT INTO ingredients(ingredient) VALUES(%s) RETURNING ingredient_id", (ingredient,))
+            ingredient_id = cursor.fetchone()[0]
+        else:
+            ingredient_id = row[0]
+        cursor.execute(
+            """
+            INSERT INTO user_allergies(user_id, severity, allergen_id)
+            VALUES(%s, %s, %s)
+            ON CONFLICT (user_id, allergen_id) DO UPDATE SET severity = EXCLUDED.severity
+            """,
+            (uid, severity, ingredient_id),
+        )
         conn.commit()
-        if cursor.rowcount == 0:
-            return "ERROR: Restriction insertion unsuccessful"
-        return "Restriction added successfully"
+        return ok("Sensitivity saved successfully.", {"ingredient": ingredient, "severity": severity}, 201)
 
 
-def remove_allergen(username,allergen):
+def add_restriction(username, restriction):
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to access database."
+        return fail("Database is not configured.", 503)
+    value = (restriction or "").strip()
+    if not value:
+        return fail("Restriction is required.")
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username=%s"
-        cursor.execute(query, (username,))
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT restriction_id FROM dietary_restrictions WHERE restriction=%s", (value,))
         row = cursor.fetchone()
         if row is None:
-            return "ERROR: User not found"
-        user_id = row[0]
-        query = "SELECT ingredient_id FROM ingredients WHERE ingredient=%s"
-        cursor.execute(query, (allergen,))
-        ingredient_id = cursor.fetchone()[0]
-        query = "DELETE FROM user_allergies WHERE user_id=%s AND allergen_id=%s"
-        cursor.execute(query, (user_id, ingredient_id))
+            cursor.execute(
+                "INSERT INTO dietary_restrictions(restriction) VALUES(%s) RETURNING restriction_id",
+                (value,),
+            )
+            restriction_id = cursor.fetchone()[0]
+        else:
+            restriction_id = row[0]
+        cursor.execute(
+            """
+            INSERT INTO user_restrictions(user_id, restriction_id)
+            VALUES(%s, %s)
+            ON CONFLICT DO NOTHING
+            """,
+            (uid, restriction_id),
+        )
         conn.commit()
-        if cursor.rowcount == 0:
-            return "ERROR: Allergen deletion unsuccessful"
-        return "Allergen removed successfully"
+        return ok("Restriction saved successfully.", {"restriction": value}, 201)
 
-def remove_restriction(username,restriction):
+
+def remove_allergen(username, allergen):
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to access database."
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username=%s"
-        cursor.execute(query, (username,))
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT ingredient_id FROM ingredients WHERE ingredient=%s", ((allergen or "").lower(),))
         row = cursor.fetchone()
         if row is None:
-            return "ERROR: User not found"
-        user_id = row[0]
-        query = "SELECT restriction_id FROM dietary_restrictions WHERE restriction=%s"
-        cursor.execute(query, (restriction,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Restriction not found"
-        restriction_id = row[0]
-        query = "DELETE FROM user_restrictions WHERE user_id=%s AND restriction_id=%s"
-        cursor.execute(query, (user_id, restriction_id))
+            return fail("Sensitivity not found.", 404)
+        cursor.execute(
+            "DELETE FROM user_allergies WHERE user_id=%s AND allergen_id=%s",
+            (uid, row[0]),
+        )
         conn.commit()
         if cursor.rowcount == 0:
-            return "ERROR: Restriction deletion unsuccessful"
+            return fail("Sensitivity not found.", 404)
+        return ok("Sensitivity removed successfully.")
 
 
-def update_allergen_severity(username,allergen,new_severity):
+def remove_restriction(username, restriction):
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to access database."
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username=%s"
-        cursor.execute(query, (username,))
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT restriction_id FROM dietary_restrictions WHERE restriction=%s", (restriction,))
         row = cursor.fetchone()
         if row is None:
-            return "ERROR: User not found"
-        user_id = row[0]
-        query = "SELECT ingredient_id FROM ingredients WHERE ingredient=%s"
-        cursor.execute(query, (allergen,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Ingredient not found"
-        ingredient_id = row[0]
-        query = "UPDATE user_allergies SET severity=%s WHERE user_id=%s AND allergen_id=%s"
-        cursor.execute(query, (new_severity, user_id, ingredient_id))
+            return fail("Restriction not found.", 404)
+        cursor.execute(
+            "DELETE FROM user_restrictions WHERE user_id=%s AND restriction_id=%s",
+            (uid, row[0]),
+        )
         conn.commit()
         if cursor.rowcount == 0:
-            return "ERROR: Severity update unsuccessful"
-        return "Severity updated successfully"
+            return fail("Restriction not found.", 404)
+        return ok("Restriction removed successfully.")
+
+
+def update_allergen_severity(username, allergen, new_severity):
+    if new_severity not in {"low", "medium", "high"}:
+        return fail("Severity must be low, medium, or high.")
+    conn = get_db_conn()
+    if conn is None:
+        return fail("Database is not configured.", 503)
+    with conn.cursor() as cursor:
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT ingredient_id FROM ingredients WHERE ingredient=%s", ((allergen or "").lower(),))
+        row = cursor.fetchone()
+        if row is None:
+            return fail("Sensitivity not found.", 404)
+        cursor.execute(
+            "UPDATE user_allergies SET severity=%s WHERE user_id=%s AND allergen_id=%s",
+            (new_severity, uid, row[0]),
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            return fail("Sensitivity not found.", 404)
+        return ok("Severity updated successfully.", {"ingredient": allergen, "severity": new_severity})

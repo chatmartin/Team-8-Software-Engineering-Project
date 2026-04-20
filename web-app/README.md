@@ -10,27 +10,28 @@ This repository consolidates the frontend and backend into one codebase:
 
 ```text
 web-app/
-├─ src/
-│  ├─ app/
-│  │  ├─ page.js                         # Login UI
-│  │  ├─ page.module.css                 # Login styles
-│  │  └─ api/
-│  │     └─ auth/
-│  │        ├─ login/route.js            # Next route -> Flask /login
-│  │        └─ create-account/route.js   # Next route -> Flask /create_acc
-│  └─ lib/
-│     └─ backendProxy.js                 # Shared proxy helper to Flask
-├─ backend/
-│  ├─ flask_app_runner.py                # Flask dev entrypoint
-│  └─ flask_service/
-│     ├─ main.py                         # Flask route definitions
-│     ├─ account_handling.py             # Account/login logic
-│     ├─ food_tracking.py                # Meal tracking logic
-│     ├─ goal_tracking.py                # Goal tracking logic
-│     └─ globals.py                      # DB connection config/utilities
-├─ .env.example                          # Example environment variables
-├─ package.json
-└─ README.md
+|- src/
+|  |- app/
+|  |  |- page.js                         # Main app UI
+|  |  |- page.module.css                 # Main app styles
+|  |  `- api/                            # Next API bridge routes
+|  `- lib/
+|     |- backendProxy.js                 # Shared proxy helper to Flask
+|     |- session.js                      # Signed HTTP-only session helpers
+|     `- authedRoute.js                  # Authenticated proxy helper
+|- backend/
+|  |- flask_app_runner.py                # Flask dev entrypoint
+|  |- schema.sql                         # PostgreSQL schema
+|  |- requirements.txt                   # Python dependencies
+|  `- flask_service/
+|     |- main.py                         # Flask route definitions
+|     |- account_handling.py             # Account/login logic
+|     |- food_tracking.py                # Meal tracking logic
+|     |- goal_tracking.py                # Goal tracking logic
+|     `- globals.py                      # DB connection config/utilities
+|- .env.example                          # Example environment variables
+|- package.json
+`- README.md
 ```
 
 ## Current Tech Stack
@@ -56,13 +57,15 @@ web-app/
 
 ## Current Implemented Flow
 
-- Login page is served by Next.js at `/`
-- Frontend sends login request to Next.js API route:
-  - `POST /api/auth/login`
-- Next.js route proxies request to Flask:
-  - `POST /login`
-- Create-account proxy is also available:
-  - `POST /api/auth/create-account` -> Flask `POST /create_acc`
+- Login/create account is served by Next.js at `/`
+- Successful auth sets a signed HTTP-only session cookie
+- Next.js API routes infer the current user from that session and proxy to Flask
+- The app includes profile onboarding, preferences, search, meal logging, goals, progress, and recommendations
+- Flask returns a consistent JSON shape:
+
+```json
+{ "success": true, "message": "Success.", "data": {} }
+```
 
 ## Setup and Run
 
@@ -81,7 +84,7 @@ cd /home/perezdev/Team-8-Software-Engineering-Project/web-app
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install flask flask-cors psycopg2-binary werkzeug email-validator
+pip install -r backend/requirements.txt
 python backend/flask_app_runner.py
 ```
 
@@ -113,7 +116,18 @@ Create `.env.local` in `web-app`:
 
 ```bash
 FLASK_API_BASE_URL=http://127.0.0.1:5000
+AUTH_SESSION_SECRET=replace-with-a-long-random-secret
+POSTGRES_HOST=aws-1-us-east-1.pooler.supabase.com
+POSTGRES_DB=postgres
+POSTGRES_USER=postgres.project-ref
+POSTGRES_PASSWORD=replace-rotated-supabase-password
+POSTGRES_PORT=5432
+SPOONACULAR_API_KEY=replace-rotated-spoonacular-key
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
 ```
+
+Before running against Supabase, apply `backend/schema.sql` and rotate the database/API keys that were previously committed in source.
 
 ## Quick Verification
 
@@ -134,12 +148,12 @@ curl -s -X POST "http://localhost:3000/api/auth/login" \
 Expected successful response:
 
 ```json
-{"message":"Login successful."}
+{"success":true,"message":"Login successful.","data":{"username":"test"}}
 ```
 
 ## Important Notes
 
-- Current backend returns auth result mainly via `message` text.
-- Invalid credentials may still return HTTP `200` with an error message string.
-- Passwords in the DB must be hashed (not plain text) for login to work.
-- This project is in early-stage development; architecture is set up for clean frontend/backend separation while staying in one repository.
+- Invalid credentials now return HTTP `401`.
+- Passwords in the DB must be hashed for login to work.
+- AI explanations are optional; deterministic recommendation scoring works without `OPENAI_API_KEY`.
+- Spoonacular search requires `SPOONACULAR_API_KEY`.
