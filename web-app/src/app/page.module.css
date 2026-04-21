@@ -101,7 +101,8 @@
 .dashboardGrid,
 .twoColumn,
 .mainGrid,
-.settingsLayout {
+.settingsLayout,
+.adminLayout {
   display: grid;
   gap: 18px;
   max-width: 1440px;
@@ -124,6 +125,10 @@
 .settingsLayout {
   grid-template-columns: 220px minmax(0, 1fr);
   align-items: start;
+}
+
+.adminLayout {
+  grid-template-columns: 1fr;
 }
 
 .sideStack {
@@ -562,12 +567,70 @@
   font: inherit;
 }
 
+.passwordResetForm {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  gap: 8px;
+}
+
+.passwordResetForm input {
+  min-width: 0;
+  height: 38px;
+  border: 1px solid rgba(23, 35, 31, 0.2);
+  border-radius: 6px;
+  background: #fffaf0;
+  color: #17231f;
+  padding: 0 10px;
+  font: inherit;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.adminTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1040px;
+}
+
+.adminTable th,
+.adminTable td {
+  border-bottom: 1px solid rgba(23, 35, 31, 0.1);
+  padding: 12px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.adminTable th {
+  color: #40544d;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+
+.adminTable select {
+  min-width: 110px;
+  height: 38px;
+  border: 1px solid rgba(23, 35, 31, 0.2);
+  border-radius: 6px;
+  background: #fffaf0;
+  color: #17231f;
+  padding: 0 10px;
+  font: inherit;
+}
+
+.adminTable small {
+  display: block;
+  margin-top: 4px;
+}
+
 @media (max-width: 980px) {
   .authShell,
   .dashboardGrid,
   .twoColumn,
   .mainGrid,
-  .settingsLayout {
+  .settingsLayout,
+  .adminLayout {
     grid-template-columns: 1fr;
   }
 
@@ -615,6 +678,10 @@
   }
 
   .chatForm {
+    grid-template-columns: 1fr;
+  }
+
+  .passwordResetForm {
     grid-template-columns: 1fr;
   }
 

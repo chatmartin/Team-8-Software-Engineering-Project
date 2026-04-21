@@ -1,10 +1,8 @@
-import json
-
 import flask_service.chat as chat
 
 
-def test_chat_uses_local_fallback_without_openai_key(monkeypatch):
-    monkeypatch.setattr(chat, "OPENAI_API_KEY", "")
+def test_chat_uses_local_fallback_without_gemini_key(monkeypatch):
+    monkeypatch.setattr(chat, "GEMINI_API_KEY", "")
     monkeypatch.setattr(
         chat,
         "_context",
@@ -29,30 +27,18 @@ def test_chat_uses_local_fallback_without_openai_key(monkeypatch):
     assert "Greek Yogurt Protein Bowl" in payload["data"]["reply"]
 
 
-def test_chat_sends_context_to_openai_responses_api(monkeypatch):
+def test_chat_sends_context_to_gemini_generate_content(monkeypatch):
     captured = {}
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
+    def fake_generate_text(system_instruction, messages, temperature, max_tokens):
+        captured["system_instruction"] = system_instruction
+        captured["messages"] = messages
+        captured["temperature"] = temperature
+        captured["max_tokens"] = max_tokens
+        return "Try the Greek yogurt bowl.", {"responseId": "resp_test"}
 
-        def __exit__(self, _exc_type, _exc, _traceback):
-            return False
-
-        def read(self):
-            return json.dumps(
-                {"id": "resp_test", "output_text": "Try the Greek yogurt bowl."}
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["timeout"] = timeout
-        captured["body"] = json.loads(request.data.decode("utf-8"))
-        captured["headers"] = dict(request.header_items())
-        return FakeResponse()
-
-    monkeypatch.setattr(chat, "OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr(chat, "OPENAI_MODEL", "gpt-test")
+    monkeypatch.setattr(chat, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(chat, "GEMINI_MODEL", "gemini-test")
     monkeypatch.setattr(
         chat,
         "_context",
@@ -62,7 +48,7 @@ def test_chat_sends_context_to_openai_responses_api(monkeypatch):
             "current_recommendations": recommendations,
         },
     )
-    monkeypatch.setattr(chat.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(chat, "generate_text", fake_generate_text)
 
     payload, status = chat.chat_with_model(
         "test-user",
@@ -74,10 +60,7 @@ def test_chat_sends_context_to_openai_responses_api(monkeypatch):
     assert status == 200
     assert payload["data"]["reply"] == "Try the Greek yogurt bowl."
     assert payload["data"]["response_id"] == "resp_test"
-    assert captured["url"] == "https://api.openai.com/v1/responses"
-    assert captured["timeout"] == 30
-    assert captured["body"]["model"] == "gpt-test"
-    assert captured["body"]["store"] is False
-    assert captured["body"]["truncation"] == "auto"
-    assert captured["body"]["input"][-1]["content"] == "What should I pick?"
-    assert captured["headers"]["Authorization"] == "Bearer test-key"
+    assert "meal planning assistant" in captured["system_instruction"]
+    assert "CURRENT_CONTEXT JSON" in captured["messages"][0][1]
+    assert captured["messages"][-1] == ("user", "What should I pick?")
+    assert captured["max_tokens"] == 900

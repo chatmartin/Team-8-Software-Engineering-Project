@@ -3,7 +3,8 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from .account_handling import create_account, delete_account, login, update_email
+from .account_handling import create_account, delete_account, get_account, login, update_email
+from .admin import delete_user, list_users, reset_user_password, update_user_role
 from .bio_data import (
     add_bio_data,
     get_bio_data,
@@ -74,6 +75,43 @@ def create_app():
     def signin():
         data = _payload()
         return _json(login(data.get("username"), data.get("password")))
+
+    @app.route("/current_user", methods=["GET"])
+    def current_user():
+        data = _payload()
+        return _json(get_account(data.get("username")))
+
+    @app.route("/admin/users", methods=["GET"])
+    def admin_users():
+        data = _payload()
+        return _json(list_users(data.get("username")))
+
+    @app.route("/admin/users/role", methods=["PUT"])
+    def admin_user_role():
+        data = _payload()
+        return _json(
+            update_user_role(
+                data.get("username"),
+                data.get("target_username"),
+                data.get("role"),
+            )
+        )
+
+    @app.route("/admin/users/password", methods=["PUT"])
+    def admin_user_password():
+        data = _payload()
+        return _json(
+            reset_user_password(
+                data.get("username"),
+                data.get("target_username"),
+                data.get("password"),
+            )
+        )
+
+    @app.route("/admin/users/delete", methods=["DELETE"])
+    def admin_user_delete():
+        data = _payload()
+        return _json(delete_user(data.get("username"), data.get("target_username")))
 
     @app.route("/new_email", methods=["PUT"])
     def new_email():

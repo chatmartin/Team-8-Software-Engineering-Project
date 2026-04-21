@@ -17,6 +17,12 @@ const DIET_OPTIONS = [
 
 const STARTER_GOALS = ["calories", "protein", "fiber", "sodium", "sugar"];
 const KEY_NUTRIENTS = ["calories", "protein", "carbohydrates", "fat"];
+const STARTER_CHAT_MESSAGES = [
+  {
+    role: "assistant",
+    text: "Ask me about the current recommendations, ingredients, macros, or what to log next.",
+  },
+];
 
 function nutrientAmount(value) {
   if (value && typeof value === "object") {
@@ -61,6 +67,8 @@ export default function CtrlEatApp() {
   const [status, setStatus] = useState("Checking session...");
   const [loading, setLoading] = useState(true);
   const [activeView, setActiveView] = useState("dashboard");
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
   const [settingsTab, setSettingsTab] = useState("profile");
   const [profile, setProfile] = useState({});
   const [profileForm, setProfileForm] = useState({
@@ -89,14 +97,12 @@ export default function CtrlEatApp() {
   const [searchResults, setSearchResults] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [chatMessages, setChatMessages] = useState([
-    {
-      role: "assistant",
-      text: "Ask me about the current recommendations, ingredients, macros, or what to log next.",
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState(STARTER_CHAT_MESSAGES);
 
   const profileComplete = Boolean(profile?.onboarding_complete);
+  const isAdmin = user?.role === "admin";
+  const pageTitle =
+    activeView === "dashboard" ? "Recommendations" : activeView === "admin" ? "Admin" : "Settings";
   const activeRecommendations = searchResults.length ? searchResults : recommendations;
   const progressMetrics = useMemo(
     () =>
@@ -125,6 +131,12 @@ export default function CtrlEatApp() {
     }
     bootstrap();
   }, []);
+
+  function resetChat() {
+    setChatInput("");
+    setChatLoading(false);
+    setChatMessages(STARTER_CHAT_MESSAGES);
+  }
 
   async function loadAppData() {
     const calls = await Promise.allSettled([
@@ -165,6 +177,83 @@ export default function CtrlEatApp() {
     setStatus(failed ? failed.value.data.message : "");
   }
 
+  async function loadAdminUsers() {
+    if (!isAdmin) {
+      return;
+    }
+    setAdminLoading(true);
+    try {
+      const { data } = await requestJson("/api/admin/users");
+      setStatus(data.message);
+      setAdminUsers(data.success ? data.data ?? [] : []);
+    } catch {
+      setStatus("Unable to load admin users.");
+      setAdminUsers([]);
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function updateAdminRole(targetUsername, role) {
+    setAdminLoading(true);
+    try {
+      const { data } = await requestJson("/api/admin/users/role", {
+        method: "PUT",
+        body: JSON.stringify({ target_username: targetUsername, role }),
+      });
+      setStatus(data.message);
+      if (data.success) {
+        await loadAdminUsers();
+      }
+    } catch {
+      setStatus("Unable to update user role.");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function resetAdminPassword(targetUsername, password) {
+    setAdminLoading(true);
+    try {
+      const { data } = await requestJson("/api/admin/users/password", {
+        method: "PUT",
+        body: JSON.stringify({ target_username: targetUsername, password }),
+      });
+      setStatus(data.message);
+      if (data.success) {
+        await loadAdminUsers();
+      }
+      return data.success;
+    } catch {
+      setStatus("Unable to update user password.");
+      return false;
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function deleteAdminUser(targetUsername) {
+    const confirmed = window.confirm(`Delete ${targetUsername} and their app data?`);
+    if (!confirmed) {
+      return;
+    }
+    setAdminLoading(true);
+    try {
+      const { data } = await requestJson("/api/admin/users/delete", {
+        method: "DELETE",
+        body: JSON.stringify({ target_username: targetUsername }),
+      });
+      setStatus(data.message);
+      if (data.success) {
+        await loadAdminUsers();
+      }
+    } catch {
+      setStatus("Unable to delete user.");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
   async function submitAuth(event) {
     event.preventDefault();
     setStatus(authMode === "login" ? "Logging in..." : "Creating account...");
@@ -175,6 +264,7 @@ export default function CtrlEatApp() {
     });
     setStatus(data.message);
     if (response.ok && data.success) {
+      resetChat();
       setUser(data.data);
       await loadAppData();
     }
@@ -184,6 +274,10 @@ export default function CtrlEatApp() {
     await requestJson("/api/auth/logout", { method: "POST" });
     setUser(null);
     setStatus("");
+    resetChat();
+    setActiveView("dashboard");
+    setAdminUsers([]);
+    setSearchResults([]);
   }
 
   async function saveProfile(event) {
@@ -236,12 +330,13 @@ export default function CtrlEatApp() {
 
   async function searchMeals(event) {
     event.preventDefault();
-    setStatus("Generating recommendations...");
     const { data } = await requestJson("/api/recommendations", {
       method: "POST",
       body: JSON.stringify({ query: searchQuery }),
     });
-    setStatus(data.message);
+    if (!data.success) {
+      setStatus(data.message);
+    }
     setSearchResults(data.success ? data.data ?? [] : []);
   }
 
@@ -250,7 +345,9 @@ export default function CtrlEatApp() {
       method: "POST",
       body: JSON.stringify({ recipe_id: recipeId, eaten_at: new Date().toISOString() }),
     });
-    setStatus(data.message);
+    if (!data.success) {
+      setStatus(data.message);
+    }
     await loadAppData();
   }
 
@@ -259,7 +356,9 @@ export default function CtrlEatApp() {
       method: "DELETE",
       body: JSON.stringify({ recipe_id: meal.recipe_id, eaten_at: meal.eaten_at }),
     });
-    setStatus(data.message);
+    if (!data.success) {
+      setStatus(data.message);
+    }
     await loadAppData();
   }
 
@@ -287,7 +386,9 @@ export default function CtrlEatApp() {
       method: "POST",
       body: JSON.stringify({ recipe_id: recipeId, action }),
     });
-    setStatus(data.message);
+    if (!data.success) {
+      setStatus(data.message);
+    }
     if (action === "logged") {
       await logMeal(recipeId);
     } else {
@@ -315,14 +416,16 @@ export default function CtrlEatApp() {
           recommendations: activeRecommendations,
         }),
       });
-      setStatus(data.message);
+      if (!data.success) {
+        setStatus(data.message);
+      }
       setChatMessages((current) => [
         ...current,
         {
           role: "assistant",
           text: data.success
             ? data.data.reply
-            : "I could not reach the AI chat service. Check the backend logs and OPENAI_API_KEY.",
+            : data.message || "I could not reach the AI chat service. Check the backend logs and GEMINI_API_KEY.",
         },
       ]);
     } catch {
@@ -420,7 +523,7 @@ export default function CtrlEatApp() {
       <header className={styles.topbar}>
         <div>
           <p className={styles.eyebrow}>Ctrl+Eat</p>
-          <h1>{activeView === "dashboard" ? "Recommendations" : "Settings"}</h1>
+          <h1>{pageTitle}</h1>
         </div>
         <div className={styles.userCluster}>
           <div className={styles.navTabs}>
@@ -438,6 +541,18 @@ export default function CtrlEatApp() {
             >
               Settings
             </button>
+            {isAdmin ? (
+              <button
+                className={activeView === "admin" ? styles.activeNav : ""}
+                onClick={() => {
+                  setActiveView("admin");
+                  loadAdminUsers();
+                }}
+                type="button"
+              >
+                Admin
+              </button>
+            ) : null}
           </div>
           <span>{user.username}</span>
           <button className={styles.ghostButton} onClick={loadAppData} type="button">
@@ -448,8 +563,6 @@ export default function CtrlEatApp() {
           </button>
         </div>
       </header>
-
-      {status ? <p className={styles.status}>{status}</p> : null}
 
       {activeView === "dashboard" ? (
         <DashboardView
@@ -462,12 +575,21 @@ export default function CtrlEatApp() {
           onDismiss={(recipeId) => recommendationFeedback(recipeId, "dismissed")}
           onLog={logMeal}
           onRemoveMeal={removeMeal}
-          onSave={(recipeId) => recommendationFeedback(recipeId, "saved")}
           onSearch={searchMeals}
           onSendChat={sendChatMessage}
           progressMetrics={progressMetrics}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
+        />
+      ) : activeView === "admin" && isAdmin ? (
+        <AdminView
+          currentUsername={user.username}
+          loading={adminLoading}
+          onDeleteUser={deleteAdminUser}
+          onPasswordReset={resetAdminPassword}
+          onRefresh={loadAdminUsers}
+          onRoleChange={updateAdminRole}
+          users={adminUsers}
         />
       ) : (
         <SettingsView
@@ -495,6 +617,116 @@ export default function CtrlEatApp() {
   );
 }
 
+function AdminView({
+  currentUsername,
+  loading,
+  onDeleteUser,
+  onPasswordReset,
+  onRefresh,
+  onRoleChange,
+  users,
+}) {
+  return (
+    <section className={styles.adminLayout}>
+      <article className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <h2>User management</h2>
+          <button className={styles.ghostButton} disabled={loading} onClick={onRefresh} type="button">
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+        <div className={styles.tableWrap}>
+          <table className={styles.adminTable}>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Email</th>
+                <th>Meals</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th>Password</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((account) => {
+                const isCurrentUser = account.username === currentUsername;
+                return (
+                  <tr key={account.user_id}>
+                    <td>{account.username}</td>
+                    <td>{account.email_address || "None"}</td>
+                    <td>{account.meal_count ?? 0}</td>
+                    <td>
+                      <select
+                        aria-label={`Role for ${account.username}`}
+                        disabled={loading || isCurrentUser}
+                        onChange={(event) => onRoleChange(account.username, event.target.value)}
+                        value={account.role}
+                      >
+                        <option value="user">user</option>
+                        <option value="admin">admin</option>
+                      </select>
+                      {isCurrentUser ? <small className={styles.muted}>Current admin</small> : null}
+                    </td>
+                    <td>{account.created_at ? new Date(account.created_at).toLocaleString() : "Unknown"}</td>
+                    <td>
+                      <PasswordResetForm
+                        disabled={loading}
+                        onPasswordReset={(password) => onPasswordReset(account.username, password)}
+                        username={account.username}
+                      />
+                    </td>
+                    <td>
+                      <button
+                        className={styles.dangerButton}
+                        disabled={loading || isCurrentUser}
+                        onClick={() => onDeleteUser(account.username)}
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!users.length ? <p className={styles.muted}>No users loaded yet.</p> : null}
+      </article>
+    </section>
+  );
+}
+
+function PasswordResetForm({ disabled, onPasswordReset, username }) {
+  const [password, setPassword] = useState("");
+
+  async function submitPassword(event) {
+    event.preventDefault();
+    const success = await onPasswordReset(password);
+    if (success) {
+      setPassword("");
+    }
+  }
+
+  return (
+    <form className={styles.passwordResetForm} onSubmit={submitPassword}>
+      <input
+        aria-label={`New password for ${username}`}
+        disabled={disabled}
+        minLength={12}
+        onChange={(event) => setPassword(event.target.value)}
+        placeholder="New password"
+        type="password"
+        value={password}
+      />
+      <button className={styles.ghostButton} disabled={disabled || !password} type="submit">
+        Reset
+      </button>
+    </form>
+  );
+}
+
 function DashboardView({
   activeRecommendations,
   chatInput,
@@ -505,7 +737,6 @@ function DashboardView({
   onDismiss,
   onLog,
   onRemoveMeal,
-  onSave,
   onSearch,
   onSendChat,
   progressMetrics,
@@ -535,7 +766,6 @@ function DashboardView({
               meal={meal}
               onDismiss={() => onDismiss(meal.recipe_id)}
               onLog={() => onLog(meal.recipe_id)}
-              onSave={() => onSave(meal.recipe_id)}
             />
           ))}
           {!activeRecommendations.length ? (
@@ -842,7 +1072,7 @@ function SettingsView({
   );
 }
 
-function MealCard({ meal, onLog, onSave, onDismiss }) {
+function MealCard({ meal, onLog, onDismiss }) {
   const [showRecipe, setShowRecipe] = useState(false);
   const [showIngredients, setShowIngredients] = useState(false);
 
@@ -875,9 +1105,6 @@ function MealCard({ meal, onLog, onSave, onDismiss }) {
         </button>
         <button className={styles.ghostButton} onClick={() => setShowIngredients((value) => !value)} type="button">
           {showIngredients ? "Hide ingredients" : "Show ingredients"}
-        </button>
-        <button className={styles.ghostButton} onClick={onSave} type="button">
-          Save
         </button>
         <button className={styles.ghostButton} onClick={onDismiss} type="button">
           Dismiss

@@ -6,8 +6,20 @@ CREATE TABLE IF NOT EXISTS login_info (
   username TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
   email_address TEXT UNIQUE,
+  role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE login_info
+  ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
+
+DO $$
+BEGIN
+  ALTER TABLE login_info
+    ADD CONSTRAINT login_info_role_check CHECK (role IN ('user', 'admin'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS user_bio_data (
   user_id BIGINT PRIMARY KEY REFERENCES login_info(user_id) ON DELETE CASCADE,

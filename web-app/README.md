@@ -123,8 +123,8 @@ POSTGRES_USER=postgres.project-ref
 POSTGRES_PASSWORD=replace-rotated-supabase-password
 POSTGRES_PORT=5432
 SPOONACULAR_API_KEY=replace-rotated-spoonacular-key
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.0-flash
 ```
 
 Before running against Supabase, apply `backend/schema.sql` and rotate the database/API keys that were previously committed in source.
@@ -155,5 +155,5 @@ Expected successful response:
 
 - Invalid credentials now return HTTP `401`.
 - Passwords in the DB must be hashed for login to work.
-- AI explanations are optional; deterministic recommendation scoring works without `OPENAI_API_KEY`.
+- AI explanations/chat are optional; chat uses a local fallback and deterministic recommendation scoring works without `GEMINI_API_KEY`.
 - Spoonacular search requires `SPOONACULAR_API_KEY`.

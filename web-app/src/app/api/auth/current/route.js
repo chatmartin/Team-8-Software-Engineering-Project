@@ -1,4 +1,5 @@
 import { getSessionUser } from "../../../../lib/session";
+import { proxyToFlask } from "../../../../lib/backendProxy";
 
 export async function GET() {
   const username = await getSessionUser();
@@ -8,9 +9,18 @@ export async function GET() {
       { status: 401 }
     );
   }
-  return Response.json({
-    success: true,
-    message: "Current user obtained successfully.",
-    data: { username },
-  });
+
+  try {
+    const { status, json } = await proxyToFlask("/current_user", { username }, "GET");
+    return Response.json(json, { status });
+  } catch {
+    return Response.json(
+      {
+        success: true,
+        message: "Current user obtained from session.",
+        data: { username, role: "user" },
+      },
+      { status: 200 }
+    );
+  }
 }

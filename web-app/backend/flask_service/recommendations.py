@@ -2,11 +2,10 @@
 
 import hashlib
 import json
-import urllib.error
-import urllib.request
 
 from .food_tracking import get_cached_meals, search_meal
-from .globals import OPENAI_API_KEY, OPENAI_MODEL, fail, get_db_conn, ok
+from .gemini import GeminiError, generate_text, parse_json_text
+from .globals import GEMINI_API_KEY, fail, get_db_conn, ok
 from .goal_tracking import daily_nutrient_progress, get_goals
 from .restrictions import get_preferences
 
@@ -229,68 +228,51 @@ def _local_generated_meals(query):
 
 
 def _ai_generate_meals(query, goals, sensitivities):
-    if not OPENAI_API_KEY:
+    if not GEMINI_API_KEY:
         return []
-    body = json.dumps(
-        {
-            "model": OPENAI_MODEL,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Generate meal recommendations as strict JSON. Return an array of 3 objects with meal, "
-                        "ingredients, nutrients, recipe, and explanation. Nutrients must include calories, protein, "
-                        "carbohydrates, and fat with numeric amount and unit."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
+    try:
+        content, _payload = generate_text(
+            (
+                "Generate meal recommendations as strict JSON. Return only an array of 3 objects with meal, "
+                "ingredients, nutrients, recipe, and explanation. Nutrients must include calories, protein, "
+                "carbohydrates, and fat with numeric amount and unit. Do not wrap the JSON in markdown."
+            ),
+            [
+                (
+                    "user",
+                    json.dumps(
                         {
                             "query": query,
                             "goals": goals[:6],
                             "sensitivities": sensitivities,
                         }
                     ),
-                },
-            ],
-            "temperature": 0.4,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-            content = payload["choices"][0]["message"]["content"]
-            meals = json.loads(content)
-            generated = []
-            for meal in meals[:3]:
-                title = meal.get("meal")
-                if not title:
-                    continue
-                generated.append(
-                    {
-                        "meal_id": f"ai-{_recipe_id(f'{query}:{title}')}",
-                        "recipe_id": _recipe_id(f"{query}:{title}"),
-                        "meal": title,
-                        "ingredients": meal.get("ingredients", []),
-                        "nutrients": meal.get("nutrients", {}),
-                        "flags": [],
-                        "generated": True,
-                        "recipe": meal.get("recipe", {}),
-                        "explanation": meal.get("explanation"),
-                    }
                 )
-            return generated
-    except (urllib.error.URLError, KeyError, ValueError, TimeoutError, TypeError):
+            ],
+            temperature=0.4,
+            max_tokens=1200,
+        )
+        meals = parse_json_text(content)
+        generated = []
+        for meal in meals[:3]:
+            title = meal.get("meal")
+            if not title:
+                continue
+            generated.append(
+                {
+                    "meal_id": f"ai-{_recipe_id(f'{query}:{title}')}",
+                    "recipe_id": _recipe_id(f"{query}:{title}"),
+                    "meal": title,
+                    "ingredients": meal.get("ingredients", []),
+                    "nutrients": meal.get("nutrients", {}),
+                    "flags": [],
+                    "generated": True,
+                    "recipe": meal.get("recipe", {}),
+                    "explanation": meal.get("explanation"),
+                }
+            )
+        return generated
+    except (GeminiError, KeyError, ValueError, TypeError):
         return []
 
 
@@ -354,7 +336,7 @@ def _ensure_generated_meals(meals):
 
 
 def _ai_explain(meals):
-    if not OPENAI_API_KEY or not meals:
+    if not GEMINI_API_KEY or not meals:
         return {}
     compact = [
         {
@@ -365,38 +347,21 @@ def _ai_explain(meals):
         }
         for meal in meals[:5]
     ]
-    body = json.dumps(
-        {
-            "model": OPENAI_MODEL,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "Write concise food recommendation explanations. Do not give medical advice.",
-                },
-                {
-                    "role": "user",
-                    "content": "Explain these ranked meals in one short sentence each as JSON keyed by meal name: "
-                    + json.dumps(compact),
-                },
-            ],
-            "temperature": 0.3,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-            content = payload["choices"][0]["message"]["content"]
-            return json.loads(content)
-    except (urllib.error.URLError, KeyError, ValueError, TimeoutError):
+        content, _payload = generate_text(
+            "Write concise food recommendation explanations. Do not give medical advice. Return only JSON.",
+            [
+                (
+                    "user",
+                    "Explain these ranked meals in one short sentence each as JSON keyed by meal name: "
+                    + json.dumps(compact),
+                )
+            ],
+            temperature=0.3,
+            max_tokens=600,
+        )
+        return parse_json_text(content)
+    except (GeminiError, KeyError, ValueError):
         return {}
 
 
