@@ -17,6 +17,9 @@ const DIET_OPTIONS = [
 
 const STARTER_GOALS = ["calories", "protein", "fiber", "sodium", "sugar"];
 const KEY_NUTRIENTS = ["calories", "protein", "carbohydrates", "fat"];
+
+// Chat history is intentionally local React state only. Starting from this
+// message on login/logout keeps conversations isolated between users.
 const STARTER_CHAT_MESSAGES = [
   {
     role: "assistant",
@@ -24,6 +27,9 @@ const STARTER_CHAT_MESSAGES = [
   },
 ];
 
+// Backend nutrient objects are not perfectly uniform: some endpoints return
+// `amount`, progress can return `total`, and weekly progress can return
+// `avg_per_day`. These helpers normalize those shapes for display.
 function nutrientAmount(value) {
   if (value && typeof value === "object") {
     return value.amount ?? value.total ?? value.avg_per_day ?? 0;
@@ -50,6 +56,8 @@ function getMealNutrient(meal, nutrient) {
   return meal?.nutrients?.[nutrient] ?? { amount: 0, unit: nutrient === "calories" ? "kcal" : "g" };
 }
 
+// Shared fetch wrapper for the app's Next.js API routes. All route handlers
+// return the same JSON shape: { success, message, data }.
 async function requestJson(path, options = {}) {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -61,14 +69,20 @@ async function requestJson(path, options = {}) {
 }
 
 export default function CtrlEatApp() {
+  // Authentication and navigation state.
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState("login");
   const [authForm, setAuthForm] = useState({ username: "", email: "", password: "" });
   const [status, setStatus] = useState("Checking session...");
   const [loading, setLoading] = useState(true);
   const [activeView, setActiveView] = useState("dashboard");
+
+  // Admin-only state. The backend still enforces authorization; these values
+  // only control what the current browser session displays.
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
+
+  // User-owned nutrition/profile state loaded after authentication.
   const [settingsTab, setSettingsTab] = useState("profile");
   const [profile, setProfile] = useState({});
   const [profileForm, setProfileForm] = useState({
@@ -95,10 +109,15 @@ export default function CtrlEatApp() {
   const [recommendations, setRecommendations] = useState([]);
   const [searchQuery, setSearchQuery] = useState("grain bowl");
   const [searchResults, setSearchResults] = useState([]);
+
+  // Chat is session-local and is reset on login/logout so different users do
+  // not inherit each other's visible conversation history.
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatMessages, setChatMessages] = useState(STARTER_CHAT_MESSAGES);
 
+  // Derived view values keep render logic simple and avoid recomputing common
+  // formatting inputs in multiple components.
   const profileComplete = Boolean(profile?.onboarding_complete);
   const isAdmin = user?.role === "admin";
   const pageTitle =
@@ -113,6 +132,8 @@ export default function CtrlEatApp() {
     [progress]
   );
 
+  // On first page load, ask the Next.js session route whether a signed session
+  // cookie exists. If it does, load all user data before removing the loading UI.
   useEffect(() => {
     async function bootstrap() {
       try {
@@ -132,12 +153,17 @@ export default function CtrlEatApp() {
     bootstrap();
   }, []);
 
+  // Clears any in-browser chat history. Nothing is persisted server-side for
+  // chat, so this is enough to start a fresh conversation for a new session.
   function resetChat() {
     setChatInput("");
     setChatLoading(false);
     setChatMessages(STARTER_CHAT_MESSAGES);
   }
 
+  // Loads the main authenticated user data in parallel. Promise.allSettled lets
+  // one failing widget show a message without preventing other panels from
+  // rendering their successful data.
   async function loadAppData() {
     const calls = await Promise.allSettled([
       requestJson("/api/profile"),
@@ -177,6 +203,8 @@ export default function CtrlEatApp() {
     setStatus(failed ? failed.value.data.message : "");
   }
 
+  // Admin users are fetched on demand when the Admin tab is opened. This keeps
+  // regular dashboard loads light and avoids calling admin routes for non-admins.
   async function loadAdminUsers() {
     if (!isAdmin) {
       return;
@@ -194,6 +222,8 @@ export default function CtrlEatApp() {
     }
   }
 
+  // Role updates are sent through Next.js and then Flask, where the authoritative
+  // admin check happens against the database.
   async function updateAdminRole(targetUsername, role) {
     setAdminLoading(true);
     try {
@@ -212,6 +242,8 @@ export default function CtrlEatApp() {
     }
   }
 
+  // Admin password resets reuse the backend's normal password strength and hash
+  // rules. The plaintext password is never stored by the frontend.
   async function resetAdminPassword(targetUsername, password) {
     setAdminLoading(true);
     try {
@@ -232,6 +264,8 @@ export default function CtrlEatApp() {
     }
   }
 
+  // Deleting a user removes their login_info row; the database schema cascades
+  // user-owned meals/goals/preferences from there.
   async function deleteAdminUser(targetUsername) {
     const confirmed = window.confirm(`Delete ${targetUsername} and their app data?`);
     if (!confirmed) {
@@ -254,6 +288,8 @@ export default function CtrlEatApp() {
     }
   }
 
+  // Handles both login and account creation. Successful auth sets the session
+  // cookie in the Next route, then this client loads the user's app data.
   async function submitAuth(event) {
     event.preventDefault();
     setStatus(authMode === "login" ? "Logging in..." : "Creating account...");
@@ -270,6 +306,8 @@ export default function CtrlEatApp() {
     }
   }
 
+  // Logout clears the server cookie and resets local UI state that should not
+  // carry into another user's session.
   async function logout() {
     await requestJson("/api/auth/logout", { method: "POST" });
     setUser(null);
@@ -280,6 +318,8 @@ export default function CtrlEatApp() {
     setSearchResults([]);
   }
 
+  // Profile/preferences/goals handlers mirror the Settings tabs. After each
+  // mutation, reload the app data so the dashboard and chat context stay current.
   async function saveProfile(event) {
     event.preventDefault();
     const { data } = await requestJson("/api/profile", {
@@ -328,6 +368,8 @@ export default function CtrlEatApp() {
     await loadAppData();
   }
 
+  // Search returns recommendation cards. Successful searches update cards
+  // silently; failures still surface through status for troubleshooting.
   async function searchMeals(event) {
     event.preventDefault();
     const { data } = await requestJson("/api/recommendations", {
@@ -340,6 +382,8 @@ export default function CtrlEatApp() {
     setSearchResults(data.success ? data.data ?? [] : []);
   }
 
+  // Meal log mutations update the dashboard without showing noisy success
+  // banners. Errors still appear through status.
   async function logMeal(recipeId) {
     const { data } = await requestJson("/api/meals", {
       method: "POST",
@@ -362,6 +406,8 @@ export default function CtrlEatApp() {
     await loadAppData();
   }
 
+  // Goal edits happen from Settings and intentionally keep using status messages
+  // because the form is not visible on the dashboard.
   async function saveGoal(event) {
     event.preventDefault();
     const { data } = await requestJson("/api/goals", {
@@ -381,6 +427,8 @@ export default function CtrlEatApp() {
     await loadAppData();
   }
 
+  // Recommendation feedback is used for dismiss/log actions. The removed "Save"
+  // button used this same endpoint with the "saved" action.
   async function recommendationFeedback(recipeId, action) {
     const { data } = await requestJson("/api/recommendations", {
       method: "POST",
@@ -396,6 +444,9 @@ export default function CtrlEatApp() {
     }
   }
 
+  // Sends the visible chat history plus current recommendation cards to the
+  // backend. The backend enriches this with profile, goals, preferences, progress,
+  // and meal-log context before calling Gemini.
   async function sendChatMessage(event) {
     event.preventDefault();
     const text = chatInput.trim();
@@ -442,6 +493,7 @@ export default function CtrlEatApp() {
     }
   }
 
+  // Loading and unauthenticated states render before the main app shell.
   if (loading) {
     return (
       <main className={styles.shell}>
@@ -617,6 +669,8 @@ export default function CtrlEatApp() {
   );
 }
 
+// Admin-only user management table. The frontend disables self-destructive
+// actions for clarity, while Flask enforces the real safety rules.
 function AdminView({
   currentUsername,
   loading,
@@ -698,6 +752,8 @@ function AdminView({
   );
 }
 
+// Local form state keeps typed reset passwords out of the parent component and
+// clears the field after a successful reset.
 function PasswordResetForm({ disabled, onPasswordReset, username }) {
   const [password, setPassword] = useState("");
 
@@ -727,6 +783,8 @@ function PasswordResetForm({ disabled, onPasswordReset, username }) {
   );
 }
 
+// Main dashboard: recommendation cards on the left, progress/log/chat on the
+// right. Parent callbacks keep all data mutations centralized in CtrlEatApp.
 function DashboardView({
   activeRecommendations,
   chatInput,
@@ -846,6 +904,8 @@ function DashboardView({
   );
 }
 
+// Settings is divided into profile, preferences, and goals tabs. Each tab calls
+// parent handlers that talk to API routes and then refresh shared app data.
 function SettingsView({
   addDiet,
   addSensitivity,
@@ -1072,6 +1132,8 @@ function SettingsView({
   );
 }
 
+// A single recommendation card with expandable recipe and ingredient detail.
+// Cards expose Log/Dismiss actions but no longer expose the old Save action.
 function MealCard({ meal, onLog, onDismiss }) {
   const [showRecipe, setShowRecipe] = useState(false);
   const [showIngredients, setShowIngredients] = useState(false);
@@ -1116,6 +1178,8 @@ function MealCard({ meal, onLog, onDismiss }) {
   );
 }
 
+// Recipe details prefer backend/Spoonacular recipe fields, but fall back to
+// generic preparation steps so the card remains useful for generated meals.
 function RecipeDetails({ meal }) {
   const recipe = meal.recipe ?? {};
   const steps = recipe.steps?.length
@@ -1157,6 +1221,7 @@ function RecipeDetails({ meal }) {
   );
 }
 
+// Ingredient rows normalize missing amount/unit values into a friendly label.
 function IngredientDetails({ ingredients }) {
   return (
     <div className={styles.detailPanel}>
