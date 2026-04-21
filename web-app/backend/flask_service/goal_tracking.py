@@ -1,162 +1,144 @@
-from .globals import get_db_conn
+"""Nutrition goals and progress tracking."""
+
+from .globals import fail, get_db_conn, ok
+from .standard_goals import recommended_goal
+
+
+def _user_id(cursor, username):
+    cursor.execute("SELECT user_id FROM login_info WHERE username = %s", (username,))
+    row = cursor.fetchone()
+    return row[0] if row else None
 
 
 def get_goals(username):
     conn = get_db_conn()
     if conn is None:
-        return {"message": "ERROR: Unable to access database.", "goals": None}
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username=%s"
-        cursor.execute(query, (username,))
-        row = cursor.fetchone()
-        if row is None:
-            return {"message": "ERROR: Username does not exist.", "goals": None}
-        uid = row[0]
-        query = "SELECT n.name,ug.target_amount,n.unit,ug.min_max FROM user_goals ug JOIN nutrients n ON ug.nutrient_id=n.nutrient_id WHERE ug.user_id=%s"
-        cursor.execute(query, (uid,))
-        rows = cursor.fetchall()
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute(
+            """
+            SELECT n.name, ug.target_amount, n.unit, ug.is_max
+            FROM user_goals ug
+            JOIN nutrients n ON ug.nutrient_id = n.nutrient_id
+            WHERE ug.user_id=%s
+            ORDER BY n.name
+            """,
+            (uid,),
+        )
         goals = [
-            {
-                "nutrient":row[0],
-                "target":row[1],
-                "unit":row[2],
-                "min_max":row[3]
-            }
-            for row in rows
+            {"nutrient": row[0], "target": row[1], "unit": row[2], "min_max": "max" if row[3] else "min"}
+            for row in cursor.fetchall()
         ]
-        return {"message":"Goals obtained successfully.","goals":goals}
+        rec_payload, rec_status = recommended_goal(username)
+        recommended = rec_payload["data"] if rec_status < 400 else {}
+        return ok("Goals obtained successfully.", {"goals": goals, "recommended": recommended})
 
-def add_goal(username,nutrient,amount,min_max):
+
+def add_goal(username, nutrient, amount, min_max):
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to access database."
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query, (username,))
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT nutrient_id, unit FROM nutrients WHERE name = %s", ((nutrient or "").lower(),))
         row = cursor.fetchone()
         if row is None:
-            return "ERROR: User not found."
-        uid = row[0]
-        query = "SELECT nutrient_id FROM nutrient WHERE name = %s"
-        cursor.execute(query, (nutrient,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Nutrient not found."
-        nid = row[0]
-        query = "INSERT INTO user_goals(user_id,nutrient_id,target_amount,min_max) VALUES (%s,%s,%s,%s)"
-        cursor.execute(query, (uid, nid, amount, min_max))
+            return fail("Nutrient not found.", 404)
+        is_max = min_max == "max"
+        cursor.execute(
+            """
+            INSERT INTO user_goals(user_id, nutrient_id, target_amount, is_max)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id, nutrient_id) DO UPDATE SET
+                target_amount = EXCLUDED.target_amount,
+                is_max = EXCLUDED.is_max
+            """,
+            (uid, row[0], amount, is_max),
+        )
         conn.commit()
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Goal not found."
-        return "Goal added successfully."
+        return ok(
+            "Goal saved successfully.",
+            {"nutrient": nutrient, "target": amount, "unit": row[1], "min_max": min_max},
+            201,
+        )
 
 
 def update_goal(username, nutrient, amount, min_max):
-    conn = get_db_conn()
-    if conn is None:
-        return "ERROR: Unable to access database."
-    with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query, (username,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: User not found."
-        uid = row[0]
-        query = "SELECT nutrient_id FROM nutrient WHERE name = %s"
-        cursor.execute(query, (nutrient,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Nutrient not found."
-        nid = row[0]
-        query = "UPDATE user_goals SET target_amount = %s,min_max = %s WHERE user_id = %s AND nutrient_id = %s"
-        cursor.execute(query, (amount, min_max, uid, nid))
-        conn.commit()
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Goal not found."
-        return "Goal updated successfully."
+    return add_goal(username, nutrient, amount, min_max)
 
 
 def remove_goal(username, nutrient):
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to access database."
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query, (username,))
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT nutrient_id FROM nutrients WHERE name = %s", ((nutrient or "").lower(),))
         row = cursor.fetchone()
         if row is None:
-            return "ERROR: User not found."
-        uid = row[0]
-        query = "SELECT nutrient_id FROM nutrient WHERE name = %s"
-        cursor.execute(query, (nutrient,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Nutrient not found."
-        nid = row[0]
-        query = "DELETE FROM user_goals WHERE user_id = %s AND nutrient_id = %s"
-        cursor.execute(query, (uid, nid))
+            return fail("Nutrient not found.", 404)
+        cursor.execute("DELETE FROM user_goals WHERE user_id = %s AND nutrient_id = %s", (uid, row[0]))
         conn.commit()
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Goal not found."
-        return "Goal removed successfully."
+        if cursor.rowcount == 0:
+            return fail("Goal not found.", 404)
+        return ok("Goal removed successfully.")
+
 
 def weekly_nutrient_progress(username):
     conn = get_db_conn()
     if conn is None:
-        return {"err":"ERROR: Unable to access database."}
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query, (username,))
-        row = cursor.fetchone()
-        if row is None:
-            return {"err":"ERROR: User not found."}
-        user_id = row[0]
-        query = """
-            SELECT 
-            n.name,
-            SUM(m.amount) / NULLIF(COUNT(DISTINCT DATE(u.eaten_at)), 0) AS avg_per_day,
-            n.unit
-            FROM user_meals u
-            JOIN meal_nutrients m ON u.meal_id = m.meal_id
-            JOIN nutrients n ON m.nutrient_id = n.nutrient_id
-            WHERE u.user_id = %s
-            AND u.eaten_at >= CURRENT_DATE - INTERVAL '7 days'
-            GROUP BY n.name, n.unit;
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute(
             """
-        cursor.execute(query, (user_id,))
-        rows = cursor.fetchall()
-        if rows is []:
-            return {"err":"ERROR: No data found."}
-        data = {}
-        for name, avg, unit in rows:
-            data[name] = {
-                "avg_per_day": avg,
-                "unit": unit
-            }
-        return data
+            SELECT n.name, SUM(mn.amount) / NULLIF(COUNT(DISTINCT DATE(um.eaten_at)), 0), n.unit
+            FROM user_meals um
+            JOIN meal_nutrients mn ON um.meal_id = mn.meal_id
+            JOIN nutrients n ON mn.nutrient_id = n.nutrient_id
+            WHERE um.user_id = %s
+              AND um.eaten_at >= CURRENT_DATE - INTERVAL '7 days'
+            GROUP BY n.name, n.unit
+            ORDER BY n.name
+            """,
+            (uid,),
+        )
+        data = {
+            name: {"avg_per_day": avg or 0, "unit": unit}
+            for name, avg, unit in cursor.fetchall()
+        }
+        return ok("Weekly nutrient progress obtained successfully.", data)
+
 
 def daily_nutrient_progress(username):
     conn = get_db_conn()
     if conn is None:
-        return {"err": "ERROR: Unable to access database."}
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query, (username,))
-        row = cursor.fetchone()
-        if row is None:
-            return {"err": "ERROR: User not found."}
-        user_id = row[0]
-        query = "SELECT name,SUM(amount) AS total,unit FROM user_meals u JOIN meal_nutrients m ON u.meal_id = m.meal_id JOIN nutrients n ON m.nutrient_id = n.nutrient_id WHERE u.user_id = %s AND (eaten_at AT TIME ZONE 'UTC')::date = CURRENT_DATE"
-        cursor.execute(query, (user_id,))
-        rows = cursor.fetchall()
-        if rows is None:
-            return {"err": "ERROR: No data found."}
-        data = {"err": "Success."}
-        for row in rows:
-            data[row[0]] = []
-            data[row[0]].append(row[1])
-            data[row[0]].append(row[2])
-        return data
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute(
+            """
+            SELECT n.name, COALESCE(SUM(mn.amount), 0), n.unit
+            FROM user_meals um
+            JOIN meal_nutrients mn ON um.meal_id = mn.meal_id
+            JOIN nutrients n ON mn.nutrient_id = n.nutrient_id
+            WHERE um.user_id = %s
+              AND (um.eaten_at AT TIME ZONE 'UTC')::date = CURRENT_DATE
+            GROUP BY n.name, n.unit
+            ORDER BY n.name
+            """,
+            (uid,),
+        )
+        data = {name: {"total": total or 0, "unit": unit} for name, total, unit in cursor.fetchall()}
+        return ok("Daily nutrient progress obtained successfully.", data)

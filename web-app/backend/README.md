@@ -15,7 +15,7 @@ From `web-app/`:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install flask flask-cors psycopg2-binary werkzeug email-validator
+pip install -r backend/requirements.txt
 python backend/flask_app_runner.py
 ```
 
@@ -28,3 +28,6 @@ Set `FLASK_API_BASE_URL` in `web-app/.env.local`:
 ```bash
 FLASK_API_BASE_URL=http://127.0.0.1:5000
 ```
+
+The backend also needs the Postgres and Spoonacular variables listed in `../.env.example`.
+Run `schema.sql` in Supabase before using the app against a fresh database.

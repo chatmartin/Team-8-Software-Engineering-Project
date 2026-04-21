@@ -1,4 +1,7 @@
+import { NextResponse } from "next/server";
+
 import { proxyToFlask } from "../../../../lib/backendProxy";
+import { setSessionCookie } from "../../../../lib/session";
 
 export async function POST(request) {
   try {
@@ -9,10 +12,18 @@ export async function POST(request) {
       email: body?.email ?? "",
     });
 
-    return Response.json(json, { status });
+    const response = NextResponse.json(json, { status });
+    if (json.success && json.data?.username) {
+      setSessionCookie(response, json.data.username);
+    }
+    return response;
   } catch {
-    return Response.json(
-      { message: "Backend connection failed. Start Flask service first." },
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Backend connection failed. Start Flask service first.",
+        data: null,
+      },
       { status: 502 }
     );
   }

@@ -1,197 +1,226 @@
-#The purpose of this file is to manage the food tracking capability
-#Spoonacular API key found in globals.py
+"""Meal search and tracking logic."""
 
-from spoonacular_api_calls import *
+from .globals import CUSTOM_RESTRICTION_EXCLUDES, VALID_DIETS, fail, get_db_conn, ok
+from .spoonacular_api_calls import fetch_meals
 
-def query_builder(meal_query,username,cursor):
-    # Take care of allergens and strong dislikes
-    query = "SELECT ingredient,severity FROM (ingredients i JOIN user_allergies a ON allergen_id = ingredient_id) JOIN login_info l ON a.user_id = l.user_id WHERE username = %s AND (severity = 'high' OR severity = 'medium')"
-    cursor.execute(query, (username,))
-    rows = cursor.fetchall()
+
+def _user_id(cursor, username):
+    cursor.execute("SELECT user_id FROM login_info WHERE username = %s", (username,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
+def _serialize_dt(value):
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _fallback_recipe(meal_name, ingredients):
+    ingredient_names = [item["name"] for item in ingredients[:6]]
+    prep_list = ", ".join(ingredient_names) if ingredient_names else "the prepared ingredients"
+    return {
+        "servings": 1,
+        "ready_in_minutes": 15,
+        "steps": [
+            f"Gather {prep_list}.",
+            "Combine the ingredients and season to taste.",
+            "Serve chilled or warmed depending on the meal style.",
+        ],
+        "summary": f"A simple recipe outline for {meal_name}.",
+    }
+
+
+def query_builder(meal_query, username, cursor):
+    cursor.execute(
+        """
+        SELECT i.ingredient, a.severity
+        FROM user_allergies a
+        JOIN ingredients i ON a.allergen_id = i.ingredient_id
+        JOIN login_info l ON a.user_id = l.user_id
+        WHERE l.username = %s AND a.severity IN ('high', 'medium')
+        """,
+        (username,),
+    )
     allergens = []
     excludes = []
-    for risk in rows:
-        if risk[1] == 'high':
-            allergens.append(risk[0])
+    for ingredient, severity in cursor.fetchall():
+        if severity == "high":
+            allergens.append(ingredient)
         else:
-            excludes.append(risk[0])
+            excludes.append(ingredient)
 
-    # Account for user diet
-    query = "SELECT restriction FROM (user_restrictions u JOIN dietary_restrictions r ON u.restriction_id = r.restriction_id) JOIN login_info l ON u.user_id = l.user_id WHERE username = %s"
-    cursor.execute(query, (username,))
-    rows = cursor.fetchall()
-    diets = []
-    for diet in rows:
-        if diet[0] in valid_diets:
-            diets.append(diet[0])
-        else:
-            if (diet[0] == 'halal' or diet[0] == 'kosher') and 'pork' not in excludes:
-                excludes.append('pork')
-            if diet[0] == 'halal':
-                if 'alcohol' not in excludes:
-                    excludes.append('alcohol')
-                if 'blood' not in excludes:
-                    excludes.append('blood')
-            if diet[0] == 'kosher':
-                if 'shellfish' not in excludes:
-                    excludes.append('shellfish')
-                if 'squid' not in excludes:
-                    excludes.append('squid')
-                if 'octopus' not in excludes:
-                    excludes.append('octopus')
-                if 'shark' not in excludes:
-                    excludes.append('shark')
-                if 'eel' not in excludes:
-                    excludes.append('eel')
-                if 'insects' not in excludes:
-                    excludes.append('insects')
-                if 'blood' not in excludes:
-                    excludes.append('blood')
-                if 'rabbit' not in excludes:
-                    excludes.append('rabbit')
-                if 'camel' not in excludes:
-                    excludes.append('camel')
-            if diet[0] == 'beef free' and 'beef' not in excludes:
-                excludes.append('beef')
-            if diet[0] == 'dairy free' and 'dairy' not in excludes:
-                excludes.append('dairy')
-            if diet[0] == 'egg free' and 'egg' not in excludes:
-                excludes.append('egg')
-    query_list = [meal_query.lower(), sorted(diets), sorted(allergens), sorted(excludes)]
-    return query_list
-
-def cache_results(query_list,signature,cursor,conn):
-    # insert query
     cursor.execute(
-        "INSERT INTO queries (query_signature) VALUES (%s)",
-        (signature,)
+        """
+        SELECT r.restriction
+        FROM user_restrictions u
+        JOIN dietary_restrictions r ON u.restriction_id = r.restriction_id
+        JOIN login_info l ON u.user_id = l.user_id
+        WHERE l.username = %s
+        """,
+        (username,),
+    )
+    diets = []
+    for (restriction,) in cursor.fetchall():
+        if restriction in VALID_DIETS:
+            diets.append(restriction)
+        for excluded in CUSTOM_RESTRICTION_EXCLUDES.get(restriction, []):
+            if excluded not in excludes:
+                excludes.append(excluded)
+
+    return [(meal_query or "").lower(), sorted(diets), sorted(allergens), sorted(excludes)]
+
+
+def cache_results(query_list, signature, cursor, conn):
+    cursor.execute(
+        """
+        INSERT INTO queries (query_signature)
+        VALUES (%s)
+        ON CONFLICT (query_signature) DO NOTHING
+        """,
+        (signature,),
     )
     conn.commit()
 
-    # get query id
-    cursor.execute(
-        "SELECT query_id FROM queries WHERE query_signature = %s",
-        (signature,)
-    )
+    cursor.execute("SELECT query_id FROM queries WHERE query_signature = %s", (signature,))
     qid = cursor.fetchone()[0]
 
-    # call API
     meal_results = fetch_meals(query_list[0], query_list[1], query_list[2], query_list[3])
-    if not meal_results:
+    if meal_results is None:
         return False
 
-    # loop through meals with rank
     for rank, meal in enumerate(meal_results, start=1):
-
-        # STEP 2A: Check if meal exists
-        cursor.execute(
-            "SELECT meal_id FROM meals WHERE recipe_id = %s",
-            (meal['recipe_id'],)
-        )
+        cursor.execute("SELECT meal_id FROM meals WHERE recipe_id = %s", (meal["recipe_id"],))
         row = cursor.fetchone()
 
         if row is None:
-            # insert meal
             cursor.execute(
                 "INSERT INTO meals (meal, recipe_id) VALUES (%s, %s)",
-                (meal['meal'], meal['recipe_id'])
+                (meal["meal"], meal["recipe_id"]),
             )
             conn.commit()
-
-            # get meal id
-            cursor.execute(
-                "SELECT meal_id FROM meals WHERE recipe_id = %s",
-                (meal['recipe_id'],)
-            )
+            cursor.execute("SELECT meal_id FROM meals WHERE recipe_id = %s", (meal["recipe_id"],))
             mid = cursor.fetchone()[0]
 
-            # Insert nutrients
-            for nutrient, val in meal['nutrients'].items():
-                cursor.execute(
-                    "SELECT nutrient_id FROM nutrients WHERE name = %s",
-                    (nutrient,)
-                )
+            for nutrient, val in meal["nutrients"].items():
+                cursor.execute("SELECT nutrient_id FROM nutrients WHERE name = %s", (nutrient,))
                 nrow = cursor.fetchone()
                 if nrow is None:
-                    continue  # skip if not found (extra safety measure, shouldn't happen)
-
-                nid = nrow[0]
-
+                    continue
                 cursor.execute(
-                    "INSERT INTO meal_nutrients (meal_id, nutrient_id, amount) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                    (mid, nid, val['amount'])
+                    """
+                    INSERT INTO meal_nutrients (meal_id, nutrient_id, amount)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (mid, nrow[0], val["amount"]),
                 )
-                conn.commit()
 
-            # Insert ingredients
-            for ing in meal['ingredients']:
-
-                cursor.execute(
-                    "SELECT ingredient_id FROM ingredients WHERE ingredient = %s",
-                    (ing['name'],)
-                )
+            for ing in meal["ingredients"]:
+                ingredient = ing["name"].lower()
+                cursor.execute("SELECT ingredient_id FROM ingredients WHERE ingredient = %s", (ingredient,))
                 irow = cursor.fetchone()
-
                 if irow is None:
-                    cursor.execute(
-                        "INSERT INTO ingredients (ingredient) VALUES (%s)",
-                        (ing['name'],)
-                    )
+                    cursor.execute("INSERT INTO ingredients (ingredient) VALUES (%s)", (ingredient,))
                     conn.commit()
-
-                    cursor.execute(
-                        "SELECT ingredient_id FROM ingredients WHERE ingredient = %s",
-                        (ing['name'],)
-                    )
+                    cursor.execute("SELECT ingredient_id FROM ingredients WHERE ingredient = %s", (ingredient,))
                     iid = cursor.fetchone()[0]
                 else:
                     iid = irow[0]
-
                 cursor.execute(
-                    "INSERT INTO meal_ingredients (meal_id, ingredient_id, amount, unit) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
-                    (mid, iid, ing['amount'], ing['unit'])
+                    """
+                    INSERT INTO meal_ingredients (meal_id, ingredient_id, amount, unit)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (mid, iid, ing.get("amount"), ing.get("unit")),
                 )
-                conn.commit()
-
             conn.commit()
-
         else:
             mid = row[0]
 
-        # Insert rank
         cursor.execute(
-            "INSERT INTO meal_queries (meal_id, query_id, rank) VALUES (%s, %s, %s)",
-            (mid, qid, rank)
+            """
+            INSERT INTO meal_queries (meal_id, query_id, rank)
+            VALUES (%s, %s, %s)
+            ON CONFLICT DO NOTHING
+            """,
+            (mid, qid, rank),
         )
 
     conn.commit()
     return True
 
-#TODO: May need to modify
+
+def _hydrate_meal(cursor, mid, meal_name, recipe_id, username=None):
+    meal_data = {
+        "meal_id": mid,
+        "meal": meal_name,
+        "recipe_id": recipe_id,
+        "ingredients": [],
+        "nutrients": {},
+        "flags": [],
+        "recipe": None,
+    }
+
+    cursor.execute(
+        """
+        SELECT i.ingredient, mi.amount, mi.unit
+        FROM meal_ingredients mi
+        JOIN ingredients i ON mi.ingredient_id = i.ingredient_id
+        WHERE mi.meal_id = %s
+        ORDER BY i.ingredient
+        """,
+        (mid,),
+    )
+    for name, amount, unit in cursor.fetchall():
+        meal_data["ingredients"].append({"name": name, "amount": amount, "unit": unit})
+
+    cursor.execute(
+        """
+        SELECT n.name, mn.amount, n.unit
+        FROM meal_nutrients mn
+        JOIN nutrients n ON mn.nutrient_id = n.nutrient_id
+        WHERE mn.meal_id = %s
+        """,
+        (mid,),
+    )
+    for name, amount, unit in cursor.fetchall():
+        meal_data["nutrients"][name] = {"amount": amount, "unit": unit}
+
+    meal_data["recipe"] = _fallback_recipe(meal_name, meal_data["ingredients"])
+
+    if username:
+        cursor.execute(
+            """
+            SELECT i.ingredient
+            FROM user_allergies u
+            JOIN ingredients i ON i.ingredient_id = u.allergen_id
+            JOIN login_info l ON l.user_id = u.user_id
+            WHERE l.username = %s AND u.severity = 'low'
+            """,
+            (username,),
+        )
+        dislikes = [row[0] for row in cursor.fetchall()]
+        ingredient_names = [item["name"] for item in meal_data["ingredients"]]
+        for dislike in dislikes:
+            if any(dislike in name for name in ingredient_names):
+                meal_data["flags"].append(dislike)
+
+    return meal_data
+
+
 def search_meal(meal_query, username):
     conn = get_db_conn()
     if conn is None:
         return None
 
     with conn.cursor() as cursor:
-        # STEP 0: build the query signature
         query_list = query_builder(meal_query, username, cursor)
         signature = f"{query_list[0]}|{','.join(query_list[1])}|{','.join(query_list[2])}|{','.join(query_list[3])}"
 
-        # STEP 1: check if query exists
-        cursor.execute(
-            "SELECT query_id FROM queries WHERE query_signature = %s",
-            (signature,)
-        )
-        row = cursor.fetchone()
+        cursor.execute("SELECT query_id FROM queries WHERE query_signature = %s", (signature,))
+        if cursor.fetchone() is None and not cache_results(query_list, signature, cursor, conn):
+            return None
 
-        # STEP 2: if not cached then fetch and store
-        if row is None:
-            if not cache_results(query_list,signature,cursor,conn):
-                return None
-
-
-        # STEP 3: fetch cached results
         cursor.execute(
             """
             SELECT m.meal_id, m.meal, m.recipe_id
@@ -201,189 +230,140 @@ def search_meal(meal_query, username):
             WHERE q.query_signature = %s
             ORDER BY mq.rank
             """,
-            (signature,)
+            (signature,),
         )
-
-        rows = cursor.fetchall()
-        meal_results = []
-
-        for row in rows:
-            mid, meal_name, recipe_id = row
-
-            meal_data = {
-                "meal": meal_name,
-                "recipe_id": recipe_id,
-                "ingredients": [],
-                "nutrients": {},
-                "flags":[]
-            }
-
-            # ingredients
-            cursor.execute(
-                """
-                SELECT i.ingredient, m.amount, m.unit
-                FROM meal_ingredients m
-                JOIN ingredients i ON m.ingredient_id = i.ingredient_id
-                WHERE m.meal_id = %s
-                """,
-                (mid,)
-            )
-
-            for ing in cursor.fetchall():
-                meal_data["ingredients"].append({
-                    "name": ing[0],
-                    "amount": ing[1],
-                    "unit": ing[2]
-                })
-
-            # nutrients
-            cursor.execute(
-                """
-                SELECT n.name, m.amount
-                FROM meal_nutrients m
-                JOIN nutrients n ON m.nutrient_id = n.nutrient_id
-                WHERE m.meal_id = %s
-                """,
-                (mid,)
-            )
-
-            for nut in cursor.fetchall():
-                meal_data["nutrients"][nut[0]] = nut[1]
-
-            #check for low-level dislikes (flags)
-            query = "SELECT ingredient FROM ingredients i JOIN user_allergies u ON i.ingredient_id = u.allergen_id WHERE severity='low'"
-            cursor.execute(query)
-            rows = cursor.fetchall()
-            for r in rows:
-                dislike = r[0]
-                for ingredient in meal_data["ingredients"]:
-                    if dislike in ingredient["name"]:
-                        meal_data["flags"].append(dislike)
-                        break
-
-            meal_results.append(meal_data)
-
-        return meal_results
+        return [_hydrate_meal(cursor, *row, username=username) for row in cursor.fetchall()]
 
 
+def get_cached_meals(username=None, limit=25):
+    conn = get_db_conn()
+    if conn is None:
+        return []
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT meal_id, meal, recipe_id
+            FROM meals
+            ORDER BY meal_id DESC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        return [_hydrate_meal(cursor, *row, username=username) for row in cursor.fetchall()]
 
 
 def get_meals(username):
     conn = get_db_conn()
-    if conn is None: #if database is not connected, give an error
-        return {"success":False,"message":"ERROR: Unable to access database."}
+    if conn is None:
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query,(username,))
-        row = cursor.fetchone()
-        if row is None:
-            return {"success": False, "message": "ERROR: User not found."}
-        query = "SELECT m.meal_id,meal,recipe_id,eaten_at FROM meals m JOIN user_meals u ON m.meal_id = u.meal_id WHERE user_id = %s"
-        cursor.execute(query, (row[0],))
-        return {"success":True,"data":cursor.fetchall()}
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute(
+            """
+            SELECT m.meal_id, m.meal, m.recipe_id, u.eaten_at
+            FROM user_meals u
+            JOIN meals m ON m.meal_id = u.meal_id
+            WHERE u.user_id = %s
+            ORDER BY u.eaten_at DESC
+            """,
+            (uid,),
+        )
+        data = [
+            {
+                "user_meal_id": f"{row[2]}:{_serialize_dt(row[3])}",
+                "meal_id": row[0],
+                "meal": row[1],
+                "recipe_id": row[2],
+                "eaten_at": _serialize_dt(row[3]),
+            }
+            for row in cursor.fetchall()
+        ]
+        return ok("Meals obtained successfully.", data)
 
-#TODO: May need to modify eaten_at depending on how we take it in as input
-def add_meal(username,recipe_id,eaten_at):
-    conn = get_db_conn()
-    if conn is None:  # if database is not connected, give an error
-        return {"message":"ERROR: Unable to access database.","id":None}
-    with conn.cursor() as cursor:
-        #First, make sure the user exists and get their user id if they do. If they don't exist, return an error
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query,(username,))
-        row = cursor.fetchone()
-        if row is None:
-            return {"message":"ERROR: User not found.","id":None}
-        uid = row[0]
-        #Second, get the meal id
-        query = "SELECT meal_id FROM meals WHERE recipe_id = %s"
-        cursor.execute(query,(recipe_id,))
-        meal_id = cursor.fetchone()[0]
-        #Third, insert the meal into the user meals table
-        query = "INSERT INTO user_meals (user_id, meal_id, eaten_at) VALUES (%s,%s,%s)"
-        cursor.execute(query,(uid,meal_id,eaten_at))
-        conn.commit()
-        return {"message":"Meal added successfully.","id":meal_id}
 
-#Allows the user to remove an existing meal
-def remove_meal(username,recipe_id,eaten_at):
+def add_meal(username, recipe_id, eaten_at):
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to access database."
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT meal_id FROM meals WHERE recipe_id = %s"
-        cursor.execute(query,(recipe_id,))
-        meal_id = cursor.fetchone()[0]
-        query = "SELECT * FROM meals WHERE meal_id = %s"
-        cursor.execute(query,(meal_id,))
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT meal_id, meal FROM meals WHERE recipe_id = %s", (recipe_id,))
         row = cursor.fetchone()
         if row is None:
-            return "ERROR: Meal not found."
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query,(username,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: User not found."
-        #Remove the meal from the user_meals table
-        query = "DELETE FROM user_meals WHERE meal_id = %s AND user_id = %s AND eaten_at = %s"
-        cursor.execute(query,(meal_id,row[0],eaten_at))
+            return fail("Meal must be searched before it can be logged.", 404)
+        cursor.execute(
+            "INSERT INTO user_meals (user_id, meal_id, eaten_at) VALUES (%s, %s, %s)",
+            (uid, row[0], eaten_at),
+        )
         conn.commit()
-        return "Meal removed successfully."
+        return ok(
+            "Meal added successfully.",
+            {"meal_id": row[0], "meal": row[1], "recipe_id": recipe_id, "eaten_at": eaten_at},
+            201,
+        )
 
-#Allows the user to update when a meal was eaten
-def update_meal_time(username,recipe_id,eaten_at):
+
+def remove_meal(username, user_meal_id=None, recipe_id=None, eaten_at=None):
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to access database."
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        #get the user id
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query,(username,))
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT meal_id FROM meals WHERE recipe_id = %s", (recipe_id,))
         row = cursor.fetchone()
         if row is None:
-            return "ERROR: User not found."
-        user_id = row[0]
-        #get the meal id
-        query = "SELECT meal_id FROM meals WHERE recipe_id = %s"
-        cursor.execute(query,(recipe_id,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Meal not found."
-        meal_id = row[0]
-        #Now, update the data
-        query = "UPDATE user_meals SET eaten_at=%s WHERE meal_id=%s AND user_id=%s"
-        cursor.execute(query,(eaten_at,meal_id,user_id))
+            return fail("Meal not found.", 404)
+        cursor.execute(
+            "DELETE FROM user_meals WHERE meal_id = %s AND user_id = %s AND eaten_at = %s",
+            (row[0], uid, eaten_at),
+        )
         conn.commit()
         if cursor.rowcount == 0:
-            return "ERROR: Meal not found."
-        return "Meal updated successfully."
+            return fail("Meal log not found.", 404)
+        return ok("Meal removed successfully.")
 
-def update_meal(username,old_recipe_id,new_recipe_id,eaten_at):
+
+def update_meal_time(username, user_meal_id, eaten_at):
     conn = get_db_conn()
     if conn is None:
-        return "ERROR: Unable to access database."
+        return fail("Database is not configured.", 503)
     with conn.cursor() as cursor:
-        query = "SELECT user_id FROM login_info WHERE username = %s"
-        cursor.execute(query,(username,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: User not found."
-        user_id = row[0]
-        query = "SELECT meal_id FROM meals WHERE recipe_id = %s"
-        cursor.execute(query,(new_recipe_id,))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Meal not found."
-        new_meal_id = row[0]
-        query = "SELECT m.meal_id FROM meals m JOIN user_meals u ON m.meal_id = u.meal_id WHERE user_id = %s AND recipe_id = %s"
-        cursor.execute(query,(user_id,old_recipe_id))
-        row = cursor.fetchone()
-        if row is None:
-            return "ERROR: Meal not found."
-        old_meal_id = row[0]
-        query = "UPDATE user_meals SET meal_id=%s WHERE meal_id=%s AND eaten_at=%s AND user_id = %s"
-        cursor.execute(query,(new_meal_id,old_meal_id,eaten_at,user_id))
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute(
+            "UPDATE user_meals SET eaten_at = %s WHERE user_meal_id = %s AND user_id = %s",
+            (eaten_at, user_meal_id, uid),
+        )
         conn.commit()
         if cursor.rowcount == 0:
-            return "ERROR: Meal not found."
-        return "Meal updated successfully."
+            return fail("Meal log not found.", 404)
+        return ok("Meal time updated successfully.")
+
+
+def update_meal(username, user_meal_id, new_recipe_id):
+    conn = get_db_conn()
+    if conn is None:
+        return fail("Database is not configured.", 503)
+    with conn.cursor() as cursor:
+        uid = _user_id(cursor, username)
+        if uid is None:
+            return fail("User not found.", 404)
+        cursor.execute("SELECT meal_id FROM meals WHERE recipe_id = %s", (new_recipe_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return fail("Replacement meal must be searched first.", 404)
+        cursor.execute(
+            "UPDATE user_meals SET meal_id = %s WHERE user_meal_id = %s AND user_id = %s",
+            (row[0], user_meal_id, uid),
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            return fail("Meal log not found.", 404)
+        return ok("Meal updated successfully.")
